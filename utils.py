@@ -95,3 +95,36 @@ def get_hexagon_diagonals(vertices : list[tuple[int, int]]) -> list[tuple[tuple[
     diag2 = (vertices[1], vertices[4])
     diag3 = (vertices[2], vertices[5])
     return [diag1, diag2, diag3]
+
+def get_diagonals_length(diagonals: list[tuple[tuple[int, int]]]) -> list[int]:
+    """Given `diagonals`, a list of diagonals, returns their lengths."""
+    return [np.linalg.norm([pt2[1] - pt1[1], pt2[0] - pt1[0]]) for pt1, pt2 in diagonals]
+
+# https://stackoverflow.com/a/76020025/10943551
+def stretch_image(img : np.ndarray, P : tuple[int, int], V : tuple[int, int], S : float):
+    """Stretches `img` along the direction `V` by a scale factor `S` such that a line passing
+    through `P` which is perpendicular to `V` is not modified."""
+    M_translate_forward = np.array([[1, 0, -P[0]],
+                                    [0, 1, -P[1]],
+                                    [0, 0, 1   ]], dtype = float)
+    
+    Vn = V / np.linalg.norm(V)
+    cos_phi = Vn[1]
+    sin_phi = Vn[0]
+    
+    M_rotate_forward = np.array([[cos_phi, -sin_phi, 0], 
+                                 [sin_phi,  cos_phi, 0], 
+                                 [      0,        0, 1]])
+    
+    scale_W = 1
+    scale_H = S
+    M_scale = np.array([[scale_W,       0, 0], 
+                        [      0, scale_H, 0], 
+                        [      0,       0, 1]])
+    
+    M_rotate_backward = np.linalg.inv(M_rotate_forward)
+    M_translate_backward = np.linalg.inv(M_translate_forward)
+    
+    M = M_translate_backward @ M_rotate_backward @ M_scale@ M_rotate_forward @ M_translate_forward
+    
+    return cv2.warpAffine(img, M[:2], img.shape[:2][::-1], img.shape)
