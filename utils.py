@@ -5,6 +5,10 @@ import numpy as np
 import scipy.fft as spfft
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from matplotlib.patches import Circle
+from matplotlib.collections import PatchCollection
+from matplotlib.backend_bases import KeyEvent
 import sxm_reader as sxm
 import cv2
 
@@ -37,6 +41,45 @@ def get_transformation_matrix2D(u1 : np.ndarray, u2 : np.ndarray, v1 : np.ndarra
     x1 = M @ y1.T
     x2 = M @ y2.T
     return np.vstack((x1, x2))
+    
+def add_toggleable_circles(fig : Figure, axs : list[Axes], points : np.ndarray, key : str) -> None:
+    """Adds circles for each point in `points` to each axis in `axs`, adding a visibility toggle."""
+    circleslist = []
+    for ax in axs.flatten():
+        circles = []
+        for x, y in points:
+            circles.append(Circle((x, y), 3))
+        circles = PatchCollection(circles, color='r', alpha=0.5)
+        ax.add_collection(circles)
+        circleslist.append(circles)
+
+    def toggle_visibility(event : KeyEvent):
+        if event.key == key:
+            for circles in circleslist:
+                circles.set_visible(not circles.get_visible())
+            fig.canvas.draw_idle()
+    fig.canvas.mpl_connect("key_press_event", toggle_visibility)
+    
+def add_processing_sequence(fig : Figure, ax : Axes, usecb : bool, *imgs : np.ndarray) -> None:
+    """Displays several images in sequence, using , and . to scroll between them."""
+    index = 0
+    im = ax.imshow(imgs[index], cmap="gray")
+    if usecb: cb = plt.colorbar(im, ax=ax, location="bottom")
+    
+    def change_image(event : KeyEvent):
+        nonlocal index
+        if   event.key == ',': shift = -1
+        elif event.key == '<': shift = -2
+        elif event.key == '.': shift = 1
+        elif event.key == '>': shift = 2
+        else: return
+        index  = (index + shift) % len(imgs)
+        
+        im = ax.imshow(imgs[index], cmap="gray")
+        if usecb: cb.update_normal(im)
+        fig.canvas.draw_idle()
+        
+    fig.canvas.mpl_connect("key_press_event", change_image)
 
 # https://stackoverflow.com/a/10847911
 def order_vertices(vertices : np.ndarray) -> np.ndarray:
@@ -103,21 +146,14 @@ def clean_edges_binary(img : np.ndarray) -> np.ndarray:
     for borderpoint in borderindices:
         # flip so rows are y and cols are x
         cv2.floodFill(cleaned, mask, borderpoint[::-1], 0)
+
     return cleaned
 
-def set_img_center(img : np.ndarray, size : int, val) -> None:
-    """Sets a rectangle of sidelengths `size` (if even shape) or `size`+1 (if odd shape)
-    from the center of `img` to `val`, in-place."""
-    # find bottom right of rectangle
-    b0, b1 = np.array(img.shape) // 2 - size
-    if b0 < 0 or b1 < 0: raise IndexError("2*size must be smaller than all image dimensions")
-    
-    # find extents of rectangle
-    l0 = 2*size + img.shape[0] % 2
-    l1 = 2*size + img.shape[1] % 2
-    
-    # set rectangle values
-    img[b0:b0+l0+1, b1:b1+l1+1] = val
+def set_overlay_value(img : np.ndarray, pos : np.ndarray, size : int, val) -> None:
+    """Sets `img` values to `val` in a rectangle of sidelengths 2*`size` about `pos`, in place."""
+    b0, b1 = pos - size
+    length = 2*size + 1
+    img[b0:b0+length, b1:b1+length] = val
     
 def get_blob_centroids(img : np.ndarray) -> np.ndarray:
     """Returns a list of indices of blob centroids."""
