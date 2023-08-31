@@ -41,6 +41,28 @@ def get_transformation_matrix2D(u1 : np.ndarray, u2 : np.ndarray, v1 : np.ndarra
     x1 = M @ y1.T
     x2 = M @ y2.T
     return np.vstack((x1, x2))
+
+def proportional_scale(data : np.ndarray) -> np.ndarray:
+    """Scales an array such that the minimum value and minimum distance between any two datapoints is 1."""
+    # divide by smallest nonzero magnitude to scale data so that value is 1
+    sorted = np.unique(np.abs(data))
+    scale_factor = sorted[np.nonzero(sorted)][0]
+    scaled = data / scale_factor
+    
+    # shift data so that it's all positive
+    if np.min(data) < 0:
+        shifted = scaled - np.min(scaled)
+    else:
+        shifted = scaled
+
+    # find smallest difference between any two points
+    sorted = np.unique(shifted)
+    if len(sorted) < 2: raise Exception("need at least two values to calculate difference between points")
+    differences = np.roll(sorted, -1, axis=0)[:-1] - sorted[:-1]
+    smallest_difference = np.unique(differences)[0]
+    
+    # scale up scaled data so that the final smallest difference is size 1
+    return scaled / smallest_difference if smallest_difference < 1 else scaled
     
 def add_toggleable_circles(fig : Figure, axs : list[Axes], points : np.ndarray, key : str) -> None:
     """Adds circles for each point in `points` to each axis in `axs`, adding a visibility toggle."""

@@ -9,8 +9,32 @@ import PIL.Image
 import cv2
 import utils as ut
 
+# 002, 004, 005, 006, 008
+
+### LOAD AND PLOT IMAGE DATA ###
+
+fig, ax = plt.subplots(figsize=(12, 8))
+mc = MultiCursor(None, [ax], horizOn=True, color='b', lw=1)
+
 # get image data
-img = np.array(PIL.Image.open("moire.jpg").convert('L'))
+fname = "images/m008.sxm"
+if fname.endswith(".sxm"): img = ut.get_sxm_data(fname, False)
+if fname.endswith(".jpg"): img = PIL.Image.open(fname)
+
+# proportionally scale up data
+scaledimg = ut.proportional_scale(img)
+
+# shift data to all be > 0 if negative values are present
+if np.min(scaledimg) < 0:
+    shiftedimg = scaledimg - np.min(scaledimg)
+else:
+    shiftedimg = scaledimg
+    
+# convert to uints
+data = shiftedimg.astype(np.uint16)
+
+ut.add_processing_sequence(fig, ax, True, img, scaledimg, shiftedimg, data)
+plt.show()
 
 ### APPROACH 1 - shape ###
 
@@ -19,7 +43,8 @@ _, binary = cv2.threshold(img, 0, np.max(img), cv2.THRESH_BINARY+cv2.THRESH_OTSU
 binary[binary != 0] = 1
 
 # fill in the holes
-filled = ut.fill_holes(binary, (binary.shape[0], 0))
+print(binary.shape)
+filled = ut.fill_holes(binary, (0, 0))
 
 # smooth out the jagged edges with a median filter to get blobs
 k = ut.get_circular_kernel(9)
@@ -48,7 +73,9 @@ axs[1, 0].set_title("smooth edges and make blobs via median filter")
 axs[1, 1].set_title("remove blobs attached to edges")
 axs[1, 2].set_title("press < , . > to scroll through")
 
-ut.add_toggleable_circles(fig, axs, np.roll(centroids, 1, axis=1), '1')
+if len(centroids.shape) > 1:
+    ut.add_toggleable_circles(fig, axs, np.roll(centroids, 1, axis=1), '1')
+
 plt.show()
 
 ### APPROACH 2 - amplitude ###
