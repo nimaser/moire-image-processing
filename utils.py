@@ -42,27 +42,19 @@ def get_transformation_matrix2D(u1 : np.ndarray, u2 : np.ndarray, v1 : np.ndarra
     x2 = M @ y2.T
     return np.vstack((x1, x2))
 
-def proportional_scale(data : np.ndarray) -> np.ndarray:
-    """Scales an array such that the minimum value and minimum distance between any two datapoints is 1."""
-    # divide by smallest nonzero magnitude to scale data so that value is 1
-    sorted = np.unique(np.abs(data))
-    scale_factor = sorted[np.nonzero(sorted)][0]
-    scaled = data / scale_factor
+def scale_to_uint8(data : np.ndarray, expand : bool = True, convert : bool = True) -> np.ndarray:
+    """Scales an array to fill the uint8 value range (as completely as possible if `expand` is True.)."""
+    # shift data so that it's all nonnegative and has a minimum value of 0
+    shifted = data - np.min(data)
     
-    # shift data so that it's all positive
-    if np.min(data) < 0:
-        shifted = scaled - np.min(scaled)
-    else:
-        shifted = scaled
+    if expand or np.max(shifted) >= 256:
+        # scale the data so the max is 255
+        scaled = shifted * (255 / np.max(shifted))
+    else: 
+        # if the maximum value was already within the range and no expanding, we're done
+        scaled = shifted
 
-    # find smallest difference between any two points
-    sorted = np.unique(shifted)
-    if len(sorted) < 2: raise Exception("need at least two values to calculate difference between points")
-    differences = np.roll(sorted, -1, axis=0)[:-1] - sorted[:-1]
-    smallest_difference = np.unique(differences)[0]
-    
-    # scale up scaled data so that the final smallest difference is size 1
-    return scaled / smallest_difference if smallest_difference < 1 else scaled
+    return scaled.astype(np.uint8) if convert else scaled
     
 def add_toggleable_circles(fig : Figure, axs : list[Axes], points : np.ndarray, key : str) -> None:
     """Adds circles for each point in `points` to each axis in `axs`, adding a visibility toggle."""
@@ -70,7 +62,7 @@ def add_toggleable_circles(fig : Figure, axs : list[Axes], points : np.ndarray, 
     for ax in axs.flatten():
         circles = []
         for x, y in points:
-            circles.append(Circle((x, y), 3))
+            circles.append(Circle((x, y), 1))
         circles = PatchCollection(circles, color='r', alpha=0.5)
         ax.add_collection(circles)
         circleslist.append(circles)
@@ -142,27 +134,32 @@ def get_border_mask(shape : np.ndarray, width : int) -> np.ndarray:
     border[width:shape[0] - width, width:shape[1] - width] = inset
     return border
 
-def fill_holes(img : np.ndarray, initial : np.ndarray) -> np.ndarray:
-    """Fills holes in `img` starting at the specifed `initial` point."""
-    # binarize image
-    _, binary = cv2.threshold(img, 0, np.max(img), cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-    binary[binary != 0] = 1
-
+def fill_holes_binary(binary : np.ndarray, initial : np.ndarray) -> np.ndarray:
+    """Fills holes in `binary` starting at the specifed `initial` point."""
+    assert binary.dtype == np.uint8, "binary array must be of dtype np.uint8"
+    
     # apply a floodfill to the image to fill the outside of the shapes we want to fill in
-    # invert the filled image to get the negative of the original binary image (the holes)
     holes = binary.copy()
-    cv2.floodFill(holes, None, initial, 1)
+    shape = np.array(binary.shape)
+    mask = np.zeros(shape + np.array((2, 2)), dtype=np.uint8)
+    
+    cv2.floodFill(holes, mask, initial, 1)
+    
+    # invert the filled image to get the negative of the original binary image (the holes)
     holes = np.logical_not(holes)
-
-    filled = np.logical_or(binary, holes)
+    
+    # logical or combines the original image with the holes
+    filled = np.logical_or(binary, holes).astype(np.uint8)
     return filled
     
-def clean_edges_binary(img : np.ndarray) -> np.ndarray:
+def clean_edges_binary(binary : np.ndarray) -> np.ndarray:
     """Removes any blobs attached to the edge which have value 1 by flood filling with value 0."""
-    cleaned = img.astype(np.uint8)
-    shape = np.array(img.shape)
+    assert binary.dtype == np.uint8, "binary array must be of dtype np.uint8"
     
-    mask = np.zeros(shape + np.array((2, 2)), np.uint8)
+    # repeatedly floodfill from each point on the border of the binary image
+    cleaned = binary.copy()
+    shape = np.array(binary.shape)
+    mask = np.zeros(shape + np.array((2, 2)), dtype=np.uint8)
     
     borderindices = np.argwhere(0 == get_border_mask(shape, 1))
     for borderpoint in borderindices:

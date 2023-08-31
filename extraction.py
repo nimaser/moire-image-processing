@@ -8,43 +8,60 @@ from matplotlib.widgets import MultiCursor
 import PIL.Image
 import cv2
 import utils as ut
+import enum
 
 # 002, 004, 005, 006, 008
 
+### OPTIONS ###
+
+# set this so that the peaks are maximums
+FLIP_IMAGE = True
+
+# automatic, manual, and adaptive thresholding options
+class THRESH_MODE(enum.Enum):
+    AUTO = 1
+    MANUAL = 2
+    ADAPTIVE = 3
+
+BINARIZE_MODE = THRESH_MODE.ADAPTIVE
+THRESH = 117
+BLOCKSIZE = 15
+THRESH_C = 2
+
+# starting point to floodfill from when filling holes
+FILL_HOLES_INITIAL_FLOODFILL_POINT = (18, 24)
+
 ### LOAD AND PLOT IMAGE DATA ###
 
+# get image data
+fname = "images/m004.sxm"
+if fname.endswith(".jpg"):
+    img = PIL.Image.open(fname)
+if fname.endswith(".sxm"):
+    img = ut.get_sxm_data(fname, False)
+    img = ut.scale_to_uint8(img)
+
+# flip if necessary
+data = 255 - img if FLIP_IMAGE else img
+
+# plot
 fig, ax = plt.subplots(figsize=(12, 8))
 mc = MultiCursor(None, [ax], horizOn=True, color='b', lw=1)
-
-# get image data
-fname = "images/m008.sxm"
-if fname.endswith(".sxm"): img = ut.get_sxm_data(fname, False)
-if fname.endswith(".jpg"): img = PIL.Image.open(fname)
-
-# proportionally scale up data
-scaledimg = ut.proportional_scale(img)
-
-# shift data to all be > 0 if negative values are present
-if np.min(scaledimg) < 0:
-    shiftedimg = scaledimg - np.min(scaledimg)
-else:
-    shiftedimg = scaledimg
-    
-# convert to uints
-data = shiftedimg.astype(np.uint16)
-
-ut.add_processing_sequence(fig, ax, True, img, scaledimg, shiftedimg, data)
+ut.add_processing_sequence(fig, ax, True, img, data)
 plt.show()
 
 ### APPROACH 1 - shape ###
 
-# binarize image
-_, binary = cv2.threshold(img, 0, np.max(img), cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-binary[binary != 0] = 1
+# binarize image automatically if possible
+if BINARIZE_MODE == THRESH_MODE.AUTO:
+    _, binary = cv2.threshold(data, THRESH, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+if BINARIZE_MODE == THRESH_MODE.MANUAL:
+    _, binary = cv2.threshold(data, THRESH, 1, cv2.THRESH_BINARY)
+if BINARIZE_MODE == THRESH_MODE.ADAPTIVE:
+    binary = cv2.adaptiveThreshold(data, 1, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, BLOCKSIZE, THRESH_C)
 
 # fill in the holes
-print(binary.shape)
-filled = ut.fill_holes(binary, (0, 0))
+filled = ut.fill_holes_binary(binary, FILL_HOLES_INITIAL_FLOODFILL_POINT)
 
 # smooth out the jagged edges with a median filter to get blobs
 k = ut.get_circular_kernel(9)
@@ -58,15 +75,15 @@ centroids = ut.get_blob_centroids(final_blobs)
 
 # set up plot
 fig, axs = plt.subplots(2, 3, sharex=True, sharey=True, figsize=(12, 8), layout='constrained')
-fig.suptitle("Approach 1: blob method\nPress 1 to toggle circles")
+fig.suptitle("Approach 1: blob method; Press 1 to toggle circles")
 mc = MultiCursor(None, axs.flatten(), horizOn=True, color='b', lw=1)
-axs[0, 0].imshow(img         , cmap="gray")
+axs[0, 0].imshow(data        , cmap="gray")
 axs[0, 1].imshow(binary      , cmap="gray")
 axs[0, 2].imshow(filled      , cmap="gray")
 axs[1, 0].imshow(blobs       , cmap="gray")
 axs[1, 1].imshow(final_blobs , cmap="gray")
-ut.add_processing_sequence(fig, axs[1, 2], False, img, binary, filled, blobs, final_blobs)
-axs[0, 0].set_title("original img")
+ut.add_processing_sequence(fig, axs[1, 2], False, data, binary, filled, blobs, final_blobs)
+axs[0, 0].set_title("original data")
 axs[0, 1].set_title("binarize via thresholding")
 axs[0, 2].set_title("fill in closed shapes")
 axs[1, 0].set_title("smooth edges and make blobs via median filter")
