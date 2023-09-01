@@ -5,33 +5,11 @@ import numpy as np
 import scipy.ndimage as spnd
 import matplotlib.pyplot as plt
 from matplotlib.widgets import MultiCursor
+
 import PIL.Image
-import cv2
 import utils as ut
-import enum
 
 # 002, 004, 005, 006, 008
-
-### OPTIONS ###
-
-# set this so that the peaks are maximums
-FLIP_IMAGE = True
-
-# automatic, manual, and adaptive thresholding options
-class THRESH_MODE(enum.Enum):
-    AUTO = 1
-    MANUAL = 2
-    ADAPTIVE = 3
-
-BINARIZE_MODE = THRESH_MODE.ADAPTIVE
-THRESH = 117
-BLOCKSIZE = 15
-THRESH_C = 2
-
-# starting point to floodfill from when filling holes
-FILL_HOLES_INITIAL_FLOODFILL_POINT = (18, 24)
-
-### LOAD AND PLOT IMAGE DATA ###
 
 # get image data
 fname = "images/m004.sxm"
@@ -40,38 +18,18 @@ if fname.endswith(".jpg"):
 if fname.endswith(".sxm"):
     img = ut.get_sxm_data(fname, False)
     img = ut.scale_to_uint8(img)
-
-# flip if necessary
-data = 255 - img if FLIP_IMAGE else img
-
-# plot
+    
 fig, ax = plt.subplots(figsize=(12, 8))
+fig.suptitle("i to invert; click to pick floodfill location; ")
 mc = MultiCursor(None, [ax], horizOn=True, color='b', lw=1)
+
+
+
+
 ut.add_processing_sequence(fig, ax, True, img, data)
 plt.show()
 
 ### APPROACH 1 - shape ###
-
-# binarize image automatically if possible
-if BINARIZE_MODE == THRESH_MODE.AUTO:
-    _, binary = cv2.threshold(data, THRESH, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-if BINARIZE_MODE == THRESH_MODE.MANUAL:
-    _, binary = cv2.threshold(data, THRESH, 1, cv2.THRESH_BINARY)
-if BINARIZE_MODE == THRESH_MODE.ADAPTIVE:
-    binary = cv2.adaptiveThreshold(data, 1, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, BLOCKSIZE, THRESH_C)
-
-# fill in the holes
-filled = ut.fill_holes_binary(binary, FILL_HOLES_INITIAL_FLOODFILL_POINT)
-
-# smooth out the jagged edges with a median filter to get blobs
-k = ut.get_circular_kernel(9)
-blobs = spnd.median_filter(filled, footprint=k)
-
-# remove any blobs attached to the edges
-final_blobs = ut.clean_edges_binary(blobs)
-
-# get blob centroids
-centroids = ut.get_blob_centroids(final_blobs)
 
 # set up plot
 fig, axs = plt.subplots(2, 3, sharex=True, sharey=True, figsize=(12, 8), layout='constrained')

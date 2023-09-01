@@ -1,16 +1,18 @@
 # @author Nikhil Maserang
 # @date 2023/08/14
 
+import cv2
+from enum import Enum
+import sxm_reader as sxm
 import numpy as np
 import scipy.fft as spfft
+import scipy.ndimage as spnd
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from matplotlib.collections import PatchCollection
 from matplotlib.backend_bases import KeyEvent
-import sxm_reader as sxm
-import cv2
 
 ### MISC ###
 
@@ -42,20 +44,20 @@ def get_transformation_matrix2D(u1 : np.ndarray, u2 : np.ndarray, v1 : np.ndarra
     x2 = M @ y2.T
     return np.vstack((x1, x2))
 
-def scale_to_uint8(data : np.ndarray, expand : bool = True, convert : bool = True) -> np.ndarray:
-    """Scales an array to fill the uint8 value range (as completely as possible if `expand` is True.)."""
-    # shift data so that it's all nonnegative and has a minimum value of 0
-    shifted = data - np.min(data)
+# https://stackoverflow.com/a/10847911
+def order_vertices(vertices : np.ndarray) -> np.ndarray:
+    """Orders a shuffled list of polygon vertices using a polar sweep. Not in place."""  
+    # get x and y components of radial vectors between centroid and vertices;
+    # effectively centers the vertices around (0, 0)
+    dx, dy = (vertices - centroid2D(vertices)).T
     
-    if expand or np.max(shifted) >= 256:
-        # scale the data so the max is 255
-        scaled = shifted * (255 / np.max(shifted))
-    else: 
-        # if the maximum value was already within the range and no expanding, we're done
-        scaled = shifted
+    # compute polar angle via arctan(delta_y / delta_x), then sort
+    angles = np.arctan2(dy, dx)
+    indices = np.argsort(angles)
+    
+    # reorder the vertices and return
+    return vertices[indices].copy()
 
-    return scaled.astype(np.uint8) if convert else scaled
-    
 def add_toggleable_circles(fig : Figure, axs : list[Axes], points : np.ndarray, key : str) -> None:
     """Adds circles for each point in `points` to each axis in `axs`, adding a visibility toggle."""
     circleslist = []
@@ -95,25 +97,17 @@ def add_processing_sequence(fig : Figure, ax : Axes, usecb : bool, *imgs : np.nd
         
     fig.canvas.mpl_connect("key_press_event", change_image)
 
-# https://stackoverflow.com/a/10847911
-def order_vertices(vertices : np.ndarray) -> np.ndarray:
-    """Orders a shuffled list of polygon vertices using a polar sweep. Not in place."""  
-    # get x and y components of radial vectors between centroid and vertices;
-    # effectively centers the vertices around (0, 0)
-    dx, dy = (vertices - centroid2D(vertices)).T
-    
-    # compute polar angle via arctan(delta_y / delta_x), then sort
-    angles = np.arctan2(dy, dx)
-    indices = np.argsort(angles)
-    
-    # reorder the vertices and return
-    return vertices[indices].copy()
-
 ### IMAGES ###
 
 def run_shifted_fft(image_data : np.ndarray) -> np.ndarray:
     """Computes the FFT of `image_data` on outputs from -pi to pi."""
     return spfft.fftshift(spfft.fft2(image_data))
+
+def set_overlay_value(img : np.ndarray, pos : np.ndarray, size : int, val) -> None:
+    """Sets `img` values to `val` in a rectangle of sidelengths 2*`size` about `pos`, in place."""
+    b0, b1 = pos - size
+    length = 2*size + 1
+    img[b0:b0+length, b1:b1+length] = val
 
 def get_circular_kernel(size : int) -> np.ndarray:
     """Returns a square array with sidelength `size` containing a circular arrangement of 1s."""
@@ -133,6 +127,20 @@ def get_border_mask(shape : np.ndarray, width : int) -> np.ndarray:
     inset = np.ones(shape - width*2)
     border[width:shape[0] - width, width:shape[1] - width] = inset
     return border
+
+def scale_to_uint8(data : np.ndarray, expand : bool = True, convert : bool = True) -> np.ndarray:
+    """Scales an array to fill the uint8 value range (as completely as possible if `expand` is True.)."""
+    # shift data so that it's all nonnegative and has a minimum value of 0
+    shifted = data - np.min(data)
+    
+    if expand or np.max(shifted) >= 256:
+        # scale the data so the max is 255
+        scaled = shifted * (255 / np.max(shifted))
+    else: 
+        # if the maximum value was already within the range and no expanding, we're done
+        scaled = shifted
+
+    return scaled.astype(np.uint8) if convert else scaled
 
 def fill_holes_binary(binary : np.ndarray, initial : np.ndarray) -> np.ndarray:
     """Fills holes in `binary` starting at the specifed `initial` point."""
@@ -167,12 +175,6 @@ def clean_edges_binary(binary : np.ndarray) -> np.ndarray:
         cv2.floodFill(cleaned, mask, borderpoint[::-1], 0)
 
     return cleaned
-
-def set_overlay_value(img : np.ndarray, pos : np.ndarray, size : int, val) -> None:
-    """Sets `img` values to `val` in a rectangle of sidelengths 2*`size` about `pos`, in place."""
-    b0, b1 = pos - size
-    length = 2*size + 1
-    img[b0:b0+length, b1:b1+length] = val
     
 def get_blob_centroids(img : np.ndarray) -> np.ndarray:
     """Returns a list of indices of blob centroids."""
@@ -191,6 +193,62 @@ def get_blob_centroids(img : np.ndarray) -> np.ndarray:
             centroids.append((cY, cX))
     
     return np.array(centroids)
+
+# automatic, manual, and adaptive thresholding options
+class THRESH_MODE(Enum):
+    AUTO = 1
+    MANUAL = 2
+    ADAPTIVE = 3
+
+# process data using various parameters
+def process(data : np.ndarray,
+            flip : bool,
+            mode : THRESH_MODE,
+            trsh : int,
+            blck : int,
+            thrc : int,
+            init : np.ndarray,
+            smsz : int):
+    """
+    Carries out the processing steps necessary to extract peaks from an STM moire image.
+    - `data` is the original np.uint8 array
+    - `flip` is whether to invert it
+    - `mode` is THRESH_MODE.AUTO, THRESH_MODE.MANUAL, or THRESH_MODE.ADAPTIVE
+    - `trsh` is the threshold value for manual thresholding
+    - `blck` is the blocksize for adaptive thresholding
+    - `thrc` is the C value for adaptive thresholding
+    - `init` is the initial point to floodfill from when filling holes
+    - `smth` is the smoothing kernel size used when smoothing the edges of blobs 
+    
+    Returns a list of
+    - `data`        the original data
+    - inverted      inverted data (if flip == True)
+    - `binary`      binarized data
+    - `filled`      binarized data with filled in holes
+    - `smoothed`    filled in data after edges have been smoothed
+    - `cleaned`     smoothed data after any blobs touching edges have been removed
+    - `centers`     xy coordinates of centers of blobs
+    """
+    assert data.dtype is np.uint8, "input data must be of dtype np.uint8"
+    
+    inverted = np.logical_xor(data).astype(np.uint8) if flip else data
+    
+    if mode == THRESH_MODE.AUTO:
+        _, binary = cv2.threshold(inverted, trsh, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    if mode == THRESH_MODE.MANUAL:
+        _, binary = cv2.threshold(inverted, trsh, 1, cv2.THRESH_BINARY)
+    if mode == THRESH_MODE.ADAPTIVE:
+        binary = cv2.adaptiveThreshold(inverted, 1, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, blck, thrc)
+
+    filled = fill_holes_binary(binary, init)
+
+    smoothed = spnd.median_filter(filled, footprint=ut.get_circular_kernel(smsz))
+
+    cleaned = clean_edges_binary(smoothed)
+
+    centers = get_blob_centroids(cleaned)
+    
+    return data, inverted, binary, filled, smoothed, cleaned, centers
     
 ### HEXAGONS ###
 
