@@ -1,22 +1,98 @@
 # @author Nikhil Maserang
-# @date 2023/08/14
+# @date 2023/09/02
+
+import functools
+from enum import Enum
+from collections.abc import Callable
+
+import sxm_reader as sxm
 
 import cv2
-from enum import Enum
-import sxm_reader as sxm
 import numpy as np
 import scipy.fft as spfft
 import scipy.ndimage as spnd
+
+import matplotlib as mpl
 import matplotlib.pyplot as plt
+
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from matplotlib.collections import PatchCollection
 from matplotlib.backend_bases import KeyEvent
 
-### MISC ###
+### MATPLOTLIB MANIPULATION ###
 
-QUIVER_PROPS = dict(angles='xy', scale_units='xy', scale=1)
+# keybindings which interfere with typing
+KEYMAP_ENTRIES = [
+    ('keymap.fullscreen', ['f']             ),
+    ('keymap.home'      , ['h', 'r']        ),
+    ('keymap.back'      , ['c', 'backspace']),
+    ('keymap.forward'   , ['v']             ),
+    ('keymap.pan'       , ['p']             ),
+    ('keymap.zoom'      , ['o']             ),
+    ('keymap.save'      , ['s']             ),
+    ('keymap.quit'      , ['q']             ),
+    ('keymap.grid'      , ['g']             ),
+    ('keymap.grid_minor', ['G']             ),
+    ('keymap.yscale'    , ['l']             ),
+    ('keymap.xscale'    , ['k', 'L']        )
+]
+
+def disable_keybinds():
+    """Disables all keybinds in KEYMAP_ENTRIES."""
+    for keymap_name, keylist in KEYMAP_ENTRIES:
+        for key in keylist:
+            if key in mpl.rcParams[keymap_name]:
+                mpl.rcParams[keymap_name].remove(key)
+    
+def enable_keybinds():
+    """Enables all keybinds in KEYMAP_ENTRIES."""
+    for keymap_name, keylist in KEYMAP_ENTRIES:
+        for key in keylist:
+            if key not in mpl.rcParams[keymap_name]:
+                mpl.rcParams[keymap_name].append(key)
+
+def add_toggleable_circles(fig : Figure, axs : list[Axes], points : np.ndarray, key : str) -> None:
+    """Adds circles for each point in `points` to each axis in `axs`, adding a visibility toggle."""
+    circleslist = []
+    for ax in axs.flatten():
+        circles = []
+        for x, y in points:
+            circles.append(Circle((x, y), 1))
+        circles = PatchCollection(circles, color='r', alpha=0.5)
+        ax.add_collection(circles)
+        circleslist.append(circles)
+
+    def toggle_visibility(event : KeyEvent):
+        if event.key == key:
+            for circles in circleslist:
+                circles.set_visible(not circles.get_visible())
+            fig.canvas.draw_idle()
+    fig.canvas.mpl_connect("key_press_event", toggle_visibility)
+    
+def add_processing_sequence(fig : Figure, ax : Axes, usecb : bool, *imgs : np.ndarray) -> None:
+    """Displays several images in sequence, using , and . to scroll between them."""
+    index = 0
+    im = ax.imshow(imgs[index], cmap="gray")
+    if usecb: cb = plt.colorbar(im, ax=ax, location="bottom")
+    
+    def change_image(event : KeyEvent):
+        nonlocal index
+        if   event.key == ',': shift = -1
+        elif event.key == '<': shift = -2
+        elif event.key == '.': shift = 1
+        elif event.key == '>': shift = 2
+        else: return
+        index  = (index + shift) % len(imgs)
+        
+        im = ax.imshow(imgs[index], cmap="gray")
+        if usecb: cb.update_normal(im)
+        fig.canvas.draw_idle()
+        
+    fig.canvas.mpl_connect("key_press_event", change_image)
+
+### MISC ###
 
 def get_sxm_data(fname : str, print_channels : bool = False) -> np.ndarray:
     """Grabs the data from the .sxm file as an ndarray."""
@@ -58,44 +134,54 @@ def order_vertices(vertices : np.ndarray) -> np.ndarray:
     # reorder the vertices and return
     return vertices[indices].copy()
 
-def add_toggleable_circles(fig : Figure, axs : list[Axes], points : np.ndarray, key : str) -> None:
-    """Adds circles for each point in `points` to each axis in `axs`, adding a visibility toggle."""
-    circleslist = []
-    for ax in axs.flatten():
-        circles = []
-        for x, y in points:
-            circles.append(Circle((x, y), 1))
-        circles = PatchCollection(circles, color='r', alpha=0.5)
-        ax.add_collection(circles)
-        circleslist.append(circles)
-
-    def toggle_visibility(event : KeyEvent):
-        if event.key == key:
-            for circles in circleslist:
-                circles.set_visible(not circles.get_visible())
-            fig.canvas.draw_idle()
-    fig.canvas.mpl_connect("key_press_event", toggle_visibility)
-    
-def add_processing_sequence(fig : Figure, ax : Axes, usecb : bool, *imgs : np.ndarray) -> None:
-    """Displays several images in sequence, using , and . to scroll between them."""
-    index = 0
-    im = ax.imshow(imgs[index], cmap="gray")
-    if usecb: cb = plt.colorbar(im, ax=ax, location="bottom")
-    
-    def change_image(event : KeyEvent):
-        nonlocal index
-        if   event.key == ',': shift = -1
-        elif event.key == '<': shift = -2
-        elif event.key == '.': shift = 1
-        elif event.key == '>': shift = 2
-        else: return
-        index  = (index + shift) % len(imgs)
+class CommandProcessor:
+    def __init__(self):
+        self.charbuffer = []
         
-        im = ax.imshow(imgs[index], cmap="gray")
-        if usecb: cb.update_normal(im)
-        fig.canvas.draw_idle()
+        self.flags = []
+        self.num_args = []
+        self.functions = []
         
-    fig.canvas.mpl_connect("key_press_event", change_image)
+    def add_cmd(self, flag : str, num_args : int, func : Callable) -> None:
+        if not flag.startswith("-"): raise Exception("flags must start with a dash (-) character")
+        if flag not in self.flags:
+            self.flags.append(flag)
+            self.num_args.append(num_args)
+            self.functions.append(func)
+            
+    def process_cmd(self) -> None:
+        cmds = []
+        
+        words = "".join(self.charbuffer).split()
+        cmd = []
+        while len(words) > 0:
+            if words[0].startswith("-"):
+                if len(cmd) > 0: cmds.append(cmd)
+                cmd = [words.pop(0)]
+            else:
+                cmd.append(words.pop(0))
+        if len(cmd) > 0: cmds.append(cmd)
+        
+        func_queue = []
+        for cmd in cmds:
+            flag, args = cmd.pop(0), cmd
+            
+            if flag not in self.flags: return
+            ind = self.flags.index(flag)
+            if len(args) != self.num_args[ind]: return
+            
+            func_queue.append(functools.partial(self.functions[ind], *args))
+        for func in func_queue: func()
+    
+    def append_char(self, char):
+        print(char)
+        if char == 'enter':
+            self.process_cmd()
+            self.charbuffer = []
+        elif char == 'backspace':
+            if len(self.charbuffer) > 0: self.charbuffer.pop()
+        elif len(char) == 1:
+            self.charbuffer.append(char)
 
 ### IMAGES ###
 
@@ -262,7 +348,7 @@ def plot_hex_radii(ax : Axes, vertices):
     
     u, v = radii.T
     colors=['red', 'orange', 'yellow', 'green', 'cyan', 'blue']
-    ax.quiver(x, y, u, v, color=colors, **QUIVER_PROPS)
+    ax.quiver(x, y, u, v, color=colors, angles='xy', scale_units='xy', scale=1)
 
 def verify_hexagon_shape(vertices : np.ndarray, tolerance : float, bgd : np.ndarray = None) -> np.ndarray:
     """Given an ordered list of hexagon vertices, returns whether the sum of the radial
@@ -292,7 +378,7 @@ def verify_hexagon_shape(vertices : np.ndarray, tolerance : float, bgd : np.ndar
         for r in range(3):
             for c in range(2):
                 # V[r, c] contains the four vectors which need to be plotted
-                axs[r, c].quiver(x, y, *V[r, c].T, color=["red", "green", "green", "blue"], **QUIVER_PROPS)
+                axs[r, c].quiver(x, y, *V[r, c].T, color=["red", "green", "green", "blue"], angles='xy', scale_units='xy', scale=1)
     
     # compare using an absolute tolerance
     return np.all(np.isclose(vectors, vector_sum, rtol=0, atol=tolerance))

@@ -4,6 +4,7 @@
 import numpy as np
 import scipy.ndimage as spnd
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 from matplotlib.widgets import MultiCursor
 
 import PIL.Image
@@ -18,15 +19,27 @@ if fname.endswith(".jpg"):
 if fname.endswith(".sxm"):
     img = ut.get_sxm_data(fname, False)
     img = ut.scale_to_uint8(img)
-    
+
+# set up figure
 fig, ax = plt.subplots(figsize=(12, 8))
-fig.suptitle("i to invert; click to pick floodfill location; ")
 mc = MultiCursor(None, [ax], horizOn=True, color='b', lw=1)
 
+# add command box
+fig.subplots_adjust(bottom=0.2)
+fig.patches.extend([Rectangle((0.1,0.05),0.8,0.1,
+                              fill=True, color='k', alpha=0.1,
+                              transform=fig.transFigure, figure=fig)])
 
+bigboi = ut.CommandProcessor()
 
+bigboi.add_cmd("-lewis", 0, lambda: print(f"lewis is cool"))
+bigboi.add_cmd("-karson", 0, lambda: print(f"karson is cool"))
+bigboi.add_cmd("-teja", 1, lambda x: print(f"teja is {x} years old"))
+bigboi.add_cmd("-nikhil", 2, lambda x, y: print(f"nikhil is {x} years old, which is {y} years more than teja"))
+fig.canvas.mpl_connect("key_press_event", lambda event: bigboi.append_char(event.key))
+fig.canvas.mpl_connect("button_press_event", lambda event: ut.enable_keybinds() if event.button == 1 else ut.disable_keybinds())
 
-ut.add_processing_sequence(fig, ax, True, img, data)
+ax.imshow(img, cmap="gray")
 plt.show()
 
 ### APPROACH 1 - shape ###
