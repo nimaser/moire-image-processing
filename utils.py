@@ -23,14 +23,14 @@ from matplotlib.backend_bases import KeyEvent
 
 ### MATPLOTLIB MANIPULATION ###
 
-def add_toggleable_circles(fig : Figure, axs : np.ndarray[Axes], points : np.ndarray, key : str) -> None:
+def add_toggleable_circles(fig : Figure, axs : np.ndarray[Axes], points : np.ndarray, color : str, key : str) -> None:
     """Adds circles for each point in `points` to each axis in `axs`, adding a visibility toggle."""
     circleslist = []
     for ax in axs.flatten():
         circles = []
         for x, y in points:
             circles.append(Circle((x, y), 1))
-        circles = PatchCollection(circles, color='r', alpha=0.5)
+        circles = PatchCollection(circles, color=color, alpha=0.5)
         ax.add_collection(circles)
         circleslist.append(circles)
 
@@ -45,7 +45,6 @@ def add_toggleable_circles(fig : Figure, axs : np.ndarray[Axes], points : np.nda
 def remove_toggleable_circles(circleslist : list) -> None:
     """Removes the circles added by `add_toggleable_circles`."""
     for circles in circleslist: circles.remove()
-    
     
 def add_processing_sequence(fig : Figure, ax : Axes, usecb : bool, imgs : np.ndarray, titles : list[str]) -> None:
     """Displays several images in sequence, using , and . to scroll between them."""
@@ -95,6 +94,7 @@ class CommandProcessor:
             self.functions.append(func)
             
     def process_cmd(self, cmdstring) -> None:
+        if cmdstring is None or len(cmdstring) == 0: return
         cmds = []
         
         words = "".join(cmdstring).split()
@@ -126,41 +126,6 @@ class CommandProcessor:
             if len(self.charbuffer) > 0: self.charbuffer.pop()
         elif len(char) == 1:
             self.charbuffer.append(char)
-            
-### DATA PROCESSING ###
-
-def centroid2D(vertices : np.ndarray) -> np.ndarray:
-    """Finds the centroid of a set of xy points."""
-    length = vertices.shape[0]
-    xvals, yvals = vertices.T
-    return np.array((np.sum(xvals) / length, np.sum(yvals) / length))
-
-def rotate2D(v : np.ndarray, theta : float) -> np.ndarray:
-    """Rotates vector `v` counterclockwise by `theta` radians."""
-    R = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
-    return R @ v.T
-
-def get_transformation_matrix2D(u1 : np.ndarray, u2 : np.ndarray, v1 : np.ndarray, v2 : np.ndarray) -> np.ndarray:
-    """Solves for the 2D transformation matrix which takes `u1` to `v1` and `u2` to `v2`."""
-    M = np.linalg.inv(np.vstack((u1, u2)))
-    y1, y2 = np.squeeze(np.vsplit(np.vstack((v1, v2)).T, 2))
-    x1 = M @ y1.T
-    x2 = M @ y2.T
-    return np.vstack((x1, x2))
-
-# https://stackoverflow.com/a/10847911
-def order_vertices(vertices : np.ndarray) -> np.ndarray:
-    """Orders a shuffled list of polygon vertices using a polar sweep. Not in place."""  
-    # get x and y components of radial vectors between centroid and vertices;
-    # effectively centers the vertices around (0, 0)
-    dx, dy = (vertices - centroid2D(vertices)).T
-    
-    # compute polar angle via arctan(delta_y / delta_x), then sort
-    angles = np.arctan2(dy, dx)
-    indices = np.argsort(angles)
-    
-    # reorder the vertices and return
-    return vertices[indices].copy()
 
 ### IMAGES ###
 
@@ -241,8 +206,8 @@ def clean_edges_binary(binary : np.ndarray) -> np.ndarray:
 
     return cleaned
     
-def get_blob_centroids(img : np.ndarray) -> np.ndarray:
-    """Returns a list of indices of blob centroids."""
+def get_uw_centroids(img : np.ndarray) -> np.ndarray:
+    """Returns a list of indices of blob centroids, unweighted by intensity."""
     centroids = []
     
     # find contours
@@ -251,14 +216,49 @@ def get_blob_centroids(img : np.ndarray) -> np.ndarray:
         # compute the center of the contour
         M = cv2.moments(contour)
         if M["m00"] != 0:
-            cX = int(M["m10"] / M["m00"])
-            cY = int(M["m01"] / M["m00"])
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
             
             # X is column, Y is row, so swap
-            centroids.append((cY, cX))
+            centroids.append((cy, cx))
     
     return np.array(centroids)
 
+# https://stackoverflow.com/a/65344493/22391526
+def get_w_centroids(img : np.ndarray) -> np.ndarray:
+    """Returns a list of indices of blob centroids, weighted by intensity."""
+    centroids = []
+    
+    # create a meshgrid for coordinate calculation
+    r,c = np.shape(img)
+    r_ = np.linspace(0,r,r+1)
+    c_ = np.linspace(0,c,c+1)
+    X, Y = np.meshgrid(c_, r_, sparse=False, indexing='xy')
+    
+    # find contours
+    contours, _ = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+    for contour in contours:
+        # Get the boundingbox
+        x,y,w,h = cv2.boundingRect(contour)
+
+        # calculate x,y coordinate of center
+        # Get the corresponding roi for calculation
+        weights = img[y:y+h,x:x+w]
+        roi_grid_x = X[y:y+h,x:x+w]
+        roi_grid_y = Y[y:y+h,x:x+w]
+        
+        # get the weighted sum
+        weighted_x = weights * roi_grid_x
+        weighted_y = weights * roi_grid_y
+        
+        if np.sum(weights) != 0:
+            cx = np.sum(weighted_x) / np.sum(weights)
+            cy = np.sum(weighted_y) / np.sum(weights)
+        
+            centroids.append((cy, cx))
+        
+    return np.array(centroids)
+        
 # performs the extraction pipeline and returns intermediate steps
 def extraction(data : np.ndarray,
                flip : bool,
@@ -267,7 +267,7 @@ def extraction(data : np.ndarray,
                blck : int,
                thrc : int,
                init : np.ndarray,
-               smsz : int):
+               smth : int):
     """
     Carries out the processing steps necessary to extract peaks from an STM moire image.
     - `data` is the original np.uint8 array
@@ -301,13 +301,51 @@ def extraction(data : np.ndarray,
 
     filled = fill_holes_binary(binary, init)
 
-    smoothed = spnd.median_filter(filled, footprint=get_circular_kernel(smsz))
+    smoothed = spnd.median_filter(filled, footprint=get_circular_kernel(smth))
 
     cleaned = clean_edges_binary(smoothed)
-
-    centers = get_blob_centroids(cleaned)
     
-    return data, flipped, binary, filled, smoothed, cleaned, centers
+    masked = cleaned * flipped
+
+    unweighted_centers = get_uw_centroids(cleaned)
+    weighted_centers = get_w_centroids(masked)
+    
+    return flipped, binary, filled, smoothed, cleaned, masked, unweighted_centers, weighted_centers
+
+### DATA PROCESSING ###
+
+def centroid2D(vertices : np.ndarray) -> np.ndarray:
+    """Finds the centroid of a set of xy points."""
+    length = vertices.shape[0]
+    xvals, yvals = vertices.T
+    return np.array((np.sum(xvals) / length, np.sum(yvals) / length))
+
+def rotate2D(v : np.ndarray, theta : float) -> np.ndarray:
+    """Rotates vector `v` counterclockwise by `theta` radians."""
+    R = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+    return R @ v.T
+
+def get_transformation_matrix2D(u1 : np.ndarray, u2 : np.ndarray, v1 : np.ndarray, v2 : np.ndarray) -> np.ndarray:
+    """Solves for the 2D transformation matrix which takes `u1` to `v1` and `u2` to `v2`."""
+    M = np.linalg.inv(np.vstack((u1, u2)))
+    y1, y2 = np.squeeze(np.vsplit(np.vstack((v1, v2)).T, 2))
+    x1 = M @ y1.T
+    x2 = M @ y2.T
+    return np.vstack((x1, x2))
+
+# https://stackoverflow.com/a/10847911
+def order_vertices(vertices : np.ndarray) -> np.ndarray:
+    """Orders a shuffled list of polygon vertices using a polar sweep. Not in place."""  
+    # get x and y components of radial vectors between centroid and vertices;
+    # effectively centers the vertices around (0, 0)
+    dx, dy = (vertices - centroid2D(vertices)).T
+    
+    # compute polar angle via arctan(delta_y / delta_x), then sort
+    angles = np.arctan2(dy, dx)
+    indices = np.argsort(angles)
+    
+    # reorder the vertices and return
+    return vertices[indices].copy()
     
 ### HEXAGONS ###
 
