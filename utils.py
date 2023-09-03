@@ -20,7 +20,6 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from matplotlib.collections import PatchCollection
 from matplotlib.backend_bases import KeyEvent
-from matplotlib.backend_bases import NavigationToolbar2
 
 ### MATPLOTLIB MANIPULATION ###
 
@@ -75,6 +74,8 @@ def get_sxm_data(fname : str, print_channels : bool = False) -> np.ndarray:
 
 class CommandProcessor:
     def __init__(self):
+        self.charbuffer = []
+        
         self.flags = []
         self.num_args = []
         self.functions = []
@@ -109,6 +110,15 @@ class CommandProcessor:
             
             func_queue.append(functools.partial(self.functions[ind], *args))
         for func in func_queue: func()
+        
+    def append_char(self, char):
+        if char == 'enter':
+            self.process_cmd(self.charbuffer)
+            self.charbuffer = []
+        elif char == 'backspace':
+            if len(self.charbuffer) > 0: self.charbuffer.pop()
+        elif len(char) == 1:
+            self.charbuffer.append(char)
             
 ### DATA PROCESSING ###
 
@@ -264,7 +274,7 @@ def extraction(data : np.ndarray,
     
     Returns a list of
     - `data`        the original data
-    - inverted      inverted data (if flip == True)
+    - `flipped`     inverted data (if flip == True)
     - `binary`      binarized data
     - `filled`      binarized data with filled in holes
     - `smoothed`    filled in data after edges have been smoothed
@@ -273,14 +283,14 @@ def extraction(data : np.ndarray,
     """
     assert data.dtype == "uint8", f"input data must be of dtype np.uint8; got type {data.dtype}"
     
-    inverted = np.logical_xor(data).astype(np.uint8) if flip else data
+    flipped = 255 - data if flip else data
     
     if mode == "auto":
-        _, binary = cv2.threshold(inverted, trsh, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        _, binary = cv2.threshold(flipped, trsh, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     if mode == "manual":
-        _, binary = cv2.threshold(inverted, trsh, 1, cv2.THRESH_BINARY)
+        _, binary = cv2.threshold(flipped, trsh, 1, cv2.THRESH_BINARY)
     if mode == "adaptive":
-        binary = cv2.adaptiveThreshold(inverted, 1, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, blck, thrc)
+        binary = cv2.adaptiveThreshold(flipped, 1, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, blck, thrc)
 
     filled = fill_holes_binary(binary, init)
 
@@ -290,7 +300,7 @@ def extraction(data : np.ndarray,
 
     centers = get_blob_centroids(cleaned)
     
-    return data, inverted, binary, filled, smoothed, cleaned, centers
+    return data, flipped, binary, filled, smoothed, cleaned, centers
     
 ### HEXAGONS ###
 

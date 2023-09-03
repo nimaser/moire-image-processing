@@ -4,7 +4,9 @@
 import numpy as np
 import scipy.ndimage as spnd
 import matplotlib.pyplot as plt
-from matplotlib.widgets import MultiCursor, TextBox
+from matplotlib.widgets import MultiCursor
+from tkinter.simpledialog import askstring
+from matplotlib.backend_bases import KeyEvent
 
 import PIL.Image
 import utils as ut
@@ -23,12 +25,12 @@ if fname.endswith(".sxm"):
 
 # set default extraction parameters
 params = dict(
-    flip = 0,
-    mode = "auto",
-    trsh = 116,
-    blck = 11,
+    flip = 1,
+    mode = "adaptive",
+    trsh = 112,
+    blck = 13,
     thrc = 2,
-    init = (0,0),
+    init = (10,9),
     smsz = 9
 )
 
@@ -63,7 +65,7 @@ def open_overlay_window():
     if len(centers.shape) > 1:
         ut.add_toggleable_circles(fig, [ax], np.roll(centers, 1, axis=1), 'v')
     fig.show()
-cmdhandler.add_cmd("-overlay", 0, open_overlay_window)
+cmdhandler.add_cmd("-over", 0, open_overlay_window)
 
 # create figure
 fig, axs = plt.subplots(2, 3, sharex=True, sharey=True, figsize=(12, 8))
@@ -88,18 +90,20 @@ def update_axes():
     axs[1, 2].imshow(imgs[5], cmap="gray")
 update_axes()
 
-# create command textbox
-textboxbbox = plt.axes([0.2, 0.025, 0.6, 0.05])
-textbox = TextBox(textboxbbox, '>>>', initial="")
-
-def on_cmd_submit(text : str):
-    cmdhandler.process_cmd(text)
-    global imgs, centers
-    *imgs, centers = ut.extraction(img, **params)
-    update_axes()
-    fig.canvas.draw_idle()
-textbox.on_submit(on_cmd_submit)
-
+# command processing
+def open_command_window(event : KeyEvent) -> None:
+    if event.key == 'e':
+        prompt = "Commands:\n-flip\n-mode\n-trsh\n-blck\n-thrc\n-init\n-smsz\n-over"
+        cmd = askstring("CmdPromptWindow", prompt)
+        print(params)
+        cmdhandler.process_cmd(cmd)
+        print(params)
+        global imgs, centers
+        *imgs, centers = ut.extraction(img, **params)
+        update_axes()
+        fig.canvas.draw_idle()
+fig.canvas.mpl_connect("key_press_event", open_command_window)
+    
 if len(centers.shape) > 1:
     ut.add_toggleable_circles(fig, axs, np.roll(centers, 1, axis=1), 'v')
 
@@ -119,7 +123,7 @@ maxes = np.where(smoothed2 == dilated, med, np.zeros(img.shape))
 # plot everything
 fig, axs = plt.subplots(2, 3, sharex=True, sharey=True, figsize=(12, 8), layout='constrained')
 fig.suptitle("amplitude method")
-mc = MultiCursor(None, axs.flatten(), True, True, True, color='b', lw=1)
+mc = MultiCursor(None, axs.flatten(), horizOn=True, color='b', lw=1)
 axs[0, 0].imshow(img       , cmap="gray")
 axs[0, 1].imshow(med       , cmap="gray")
 axs[0, 2].imshow(smoothed1 , cmap="gray")
