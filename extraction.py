@@ -1,11 +1,10 @@
 # @author Nikhil Maserang
-# @date 2023/08/14
+# @date 2023/09/02
 
 import numpy as np
 import scipy.ndimage as spnd
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
-from matplotlib.widgets import MultiCursor
+from matplotlib.widgets import MultiCursor, TextBox
 
 import PIL.Image
 import utils as ut
@@ -19,50 +18,90 @@ if fname.endswith(".jpg"):
 if fname.endswith(".sxm"):
     img = ut.get_sxm_data(fname, False)
     img = ut.scale_to_uint8(img)
+    
+###########################################################
 
-# set up figure
-fig, ax = plt.subplots(figsize=(12, 8))
-mc = MultiCursor(None, [ax], horizOn=True, color='b', lw=1)
+# set default extraction parameters
+params = dict(
+    flip = 0,
+    mode = "auto",
+    trsh = 116,
+    blck = 11,
+    thrc = 2,
+    init = (0,0),
+    smsz = 9
+)
 
-# add command box
-fig.subplots_adjust(bottom=0.2)
-fig.patches.extend([Rectangle((0.1,0.05),0.8,0.1,
-                              fill=True, color='k', alpha=0.1,
-                              transform=fig.transFigure, figure=fig)])
+# initial data processing
+*imgs, centers = ut.extraction(img, **params)
+titles = [
+    "original",
+    "flipped",
+    "binarized",
+    "filled in",
+    "blobs smoothed",
+    "edges cleaned"
+]
 
-bigboi = ut.CommandProcessor()
+# command handling
+cmdhandler = ut.CommandProcessor()
+cmdhandler.add_cmd("-flip", 1, lambda x: params.update(dict(flip=int(x))))
+cmdhandler.add_cmd("-mode", 1, lambda x: params.update(dict(mode=x)))
+cmdhandler.add_cmd("-trsh", 1, lambda x: params.update(dict(trsh=int(x))))
+cmdhandler.add_cmd("-blck", 1, lambda x: params.update(dict(blck=int(x))))
+cmdhandler.add_cmd("-thrc", 1, lambda x: params.update(dict(thrc=int(x))))
+cmdhandler.add_cmd("-smsz", 1, lambda x: params.update(dict(smsz=int(x))))
 
-bigboi.add_cmd("-lewis", 0, lambda: print(f"lewis is cool"))
-bigboi.add_cmd("-karson", 0, lambda: print(f"karson is cool"))
-bigboi.add_cmd("-teja", 1, lambda x: print(f"teja is {x} years old"))
-bigboi.add_cmd("-nikhil", 2, lambda x, y: print(f"nikhil is {x} years old, which is {y} years more than teja"))
-fig.canvas.mpl_connect("key_press_event", lambda event: bigboi.append_char(event.key))
-fig.canvas.mpl_connect("button_press_event", lambda event: ut.enable_keybinds() if event.button == 1 else ut.disable_keybinds())
+def parse_init_tuple(init):
+    init = tuple(map(int, init.replace('(', '').replace(')', '').split(',')))
+    params.update(dict(init=init))
+cmdhandler.add_cmd("-init", 1, parse_init_tuple)
 
-ax.imshow(img, cmap="gray")
-plt.show()
+def open_overlay_window():
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ut.add_processing_sequence(fig, ax, True, imgs, titles)
+    if len(centers.shape) > 1:
+        ut.add_toggleable_circles(fig, [ax], np.roll(centers, 1, axis=1), 'v')
+    fig.show()
+cmdhandler.add_cmd("-overlay", 0, open_overlay_window)
 
-### APPROACH 1 - shape ###
-
-# set up plot
-fig, axs = plt.subplots(2, 3, sharex=True, sharey=True, figsize=(12, 8), layout='constrained')
-fig.suptitle("Approach 1: blob method; Press 1 to toggle circles")
+# create figure
+fig, axs = plt.subplots(2, 3, sharex=True, sharey=True, figsize=(12, 8))
+fig.subplots_adjust(bottom=0.15)
 mc = MultiCursor(None, axs.flatten(), horizOn=True, color='b', lw=1)
-axs[0, 0].imshow(data        , cmap="gray")
-axs[0, 1].imshow(binary      , cmap="gray")
-axs[0, 2].imshow(filled      , cmap="gray")
-axs[1, 0].imshow(blobs       , cmap="gray")
-axs[1, 1].imshow(final_blobs , cmap="gray")
-ut.add_processing_sequence(fig, axs[1, 2], False, data, binary, filled, blobs, final_blobs)
-axs[0, 0].set_title("original data")
-axs[0, 1].set_title("binarize via thresholding")
-axs[0, 2].set_title("fill in closed shapes")
-axs[1, 0].set_title("smooth edges and make blobs via median filter")
-axs[1, 1].set_title("remove blobs attached to edges")
-axs[1, 2].set_title("press < , . > to scroll through")
 
-if len(centroids.shape) > 1:
-    ut.add_toggleable_circles(fig, axs, np.roll(centroids, 1, axis=1), '1')
+# axes titles
+axs[0, 0].set_title(titles[0])
+axs[0, 1].set_title(titles[1])
+axs[0, 2].set_title(titles[2])
+axs[1, 0].set_title(titles[3])
+axs[1, 1].set_title(titles[4])
+axs[1, 2].set_title(titles[5])
+
+# plot images on axes
+def update_axes():
+    axs[0, 0].imshow(imgs[0], cmap="gray")
+    axs[0, 1].imshow(imgs[1], cmap="gray")
+    axs[0, 2].imshow(imgs[2], cmap="gray")
+    axs[1, 0].imshow(imgs[3], cmap="gray")
+    axs[1, 1].imshow(imgs[4], cmap="gray")
+    axs[1, 2].imshow(imgs[5], cmap="gray")
+update_axes()
+
+# create command textbox
+textboxbbox = plt.axes([0.2, 0.025, 0.6, 0.05])
+textbox = TextBox(textboxbbox, '>>>', initial="")
+
+def on_cmd_submit(text : str):
+    cmdhandler.process_cmd(text)
+    global imgs, centers
+    *imgs, centers = ut.extraction(img, **params)
+    update_axes()
+    fig.canvas.draw_idle()
+textbox.on_submit(on_cmd_submit)
+
+if len(centers.shape) > 1:
+    ut.add_toggleable_circles(fig, axs, np.roll(centers, 1, axis=1), 'v')
 
 plt.show()
 

@@ -20,38 +20,9 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from matplotlib.collections import PatchCollection
 from matplotlib.backend_bases import KeyEvent
+from matplotlib.backend_bases import NavigationToolbar2
 
 ### MATPLOTLIB MANIPULATION ###
-
-# keybindings which interfere with typing
-KEYMAP_ENTRIES = [
-    ('keymap.fullscreen', ['f']             ),
-    ('keymap.home'      , ['h', 'r']        ),
-    ('keymap.back'      , ['c', 'backspace']),
-    ('keymap.forward'   , ['v']             ),
-    ('keymap.pan'       , ['p']             ),
-    ('keymap.zoom'      , ['o']             ),
-    ('keymap.save'      , ['s']             ),
-    ('keymap.quit'      , ['q']             ),
-    ('keymap.grid'      , ['g']             ),
-    ('keymap.grid_minor', ['G']             ),
-    ('keymap.yscale'    , ['l']             ),
-    ('keymap.xscale'    , ['k', 'L']        )
-]
-
-def disable_keybinds():
-    """Disables all keybinds in KEYMAP_ENTRIES."""
-    for keymap_name, keylist in KEYMAP_ENTRIES:
-        for key in keylist:
-            if key in mpl.rcParams[keymap_name]:
-                mpl.rcParams[keymap_name].remove(key)
-    
-def enable_keybinds():
-    """Enables all keybinds in KEYMAP_ENTRIES."""
-    for keymap_name, keylist in KEYMAP_ENTRIES:
-        for key in keylist:
-            if key not in mpl.rcParams[keymap_name]:
-                mpl.rcParams[keymap_name].append(key)
 
 def add_toggleable_circles(fig : Figure, axs : list[Axes], points : np.ndarray, key : str) -> None:
     """Adds circles for each point in `points` to each axis in `axs`, adding a visibility toggle."""
@@ -71,7 +42,7 @@ def add_toggleable_circles(fig : Figure, axs : list[Axes], points : np.ndarray, 
             fig.canvas.draw_idle()
     fig.canvas.mpl_connect("key_press_event", toggle_visibility)
     
-def add_processing_sequence(fig : Figure, ax : Axes, usecb : bool, *imgs : np.ndarray) -> None:
+def add_processing_sequence(fig : Figure, ax : Axes, usecb : bool, imgs : np.ndarray, titles : list[str]) -> None:
     """Displays several images in sequence, using , and . to scroll between them."""
     index = 0
     im = ax.imshow(imgs[index], cmap="gray")
@@ -86,6 +57,7 @@ def add_processing_sequence(fig : Figure, ax : Axes, usecb : bool, *imgs : np.nd
         else: return
         index  = (index + shift) % len(imgs)
         
+        ax.set_title(titles[index])
         im = ax.imshow(imgs[index], cmap="gray")
         if usecb: cb.update_normal(im)
         fig.canvas.draw_idle()
@@ -100,6 +72,45 @@ def get_sxm_data(fname : str, print_channels : bool = False) -> np.ndarray:
     if print_channels: file_object.list_channels()
     image_data = file_object.retrieve_channel_data('Z')
     return image_data
+
+class CommandProcessor:
+    def __init__(self):
+        self.flags = []
+        self.num_args = []
+        self.functions = []
+        
+    def add_cmd(self, flag : str, num_args : int, func : Callable) -> None:
+        if not flag.startswith("-"): raise Exception("flags must start with a dash (-) character")
+        if flag not in self.flags:
+            self.flags.append(flag)
+            self.num_args.append(num_args)
+            self.functions.append(func)
+            
+    def process_cmd(self, cmdstring) -> None:
+        cmds = []
+        
+        words = "".join(cmdstring).split()
+        cmd = []
+        while len(words) > 0:
+            if words[0].startswith("-"):
+                if len(cmd) > 0: cmds.append(cmd)
+                cmd = [words.pop(0)]
+            else:
+                cmd.append(words.pop(0))
+        if len(cmd) > 0: cmds.append(cmd)
+        
+        func_queue = []
+        for cmd in cmds:
+            flag, args = cmd.pop(0), cmd
+            
+            if flag not in self.flags: return
+            ind = self.flags.index(flag)
+            if len(args) != self.num_args[ind]: return
+            
+            func_queue.append(functools.partial(self.functions[ind], *args))
+        for func in func_queue: func()
+            
+### DATA PROCESSING ###
 
 def centroid2D(vertices : np.ndarray) -> np.ndarray:
     """Finds the centroid of a set of xy points."""
@@ -133,55 +144,6 @@ def order_vertices(vertices : np.ndarray) -> np.ndarray:
     
     # reorder the vertices and return
     return vertices[indices].copy()
-
-class CommandProcessor:
-    def __init__(self):
-        self.charbuffer = []
-        
-        self.flags = []
-        self.num_args = []
-        self.functions = []
-        
-    def add_cmd(self, flag : str, num_args : int, func : Callable) -> None:
-        if not flag.startswith("-"): raise Exception("flags must start with a dash (-) character")
-        if flag not in self.flags:
-            self.flags.append(flag)
-            self.num_args.append(num_args)
-            self.functions.append(func)
-            
-    def process_cmd(self) -> None:
-        cmds = []
-        
-        words = "".join(self.charbuffer).split()
-        cmd = []
-        while len(words) > 0:
-            if words[0].startswith("-"):
-                if len(cmd) > 0: cmds.append(cmd)
-                cmd = [words.pop(0)]
-            else:
-                cmd.append(words.pop(0))
-        if len(cmd) > 0: cmds.append(cmd)
-        
-        func_queue = []
-        for cmd in cmds:
-            flag, args = cmd.pop(0), cmd
-            
-            if flag not in self.flags: return
-            ind = self.flags.index(flag)
-            if len(args) != self.num_args[ind]: return
-            
-            func_queue.append(functools.partial(self.functions[ind], *args))
-        for func in func_queue: func()
-    
-    def append_char(self, char):
-        print(char)
-        if char == 'enter':
-            self.process_cmd()
-            self.charbuffer = []
-        elif char == 'backspace':
-            if len(self.charbuffer) > 0: self.charbuffer.pop()
-        elif len(char) == 1:
-            self.charbuffer.append(char)
 
 ### IMAGES ###
 
@@ -280,26 +242,20 @@ def get_blob_centroids(img : np.ndarray) -> np.ndarray:
     
     return np.array(centroids)
 
-# automatic, manual, and adaptive thresholding options
-class THRESH_MODE(Enum):
-    AUTO = 1
-    MANUAL = 2
-    ADAPTIVE = 3
-
-# process data using various parameters
-def process(data : np.ndarray,
-            flip : bool,
-            mode : THRESH_MODE,
-            trsh : int,
-            blck : int,
-            thrc : int,
-            init : np.ndarray,
-            smsz : int):
+# performs the extraction pipeline and returns intermediate steps
+def extraction(data : np.ndarray,
+               flip : bool,
+               mode : str,
+               trsh : int,
+               blck : int,
+               thrc : int,
+               init : np.ndarray,
+               smsz : int):
     """
     Carries out the processing steps necessary to extract peaks from an STM moire image.
     - `data` is the original np.uint8 array
     - `flip` is whether to invert it
-    - `mode` is THRESH_MODE.AUTO, THRESH_MODE.MANUAL, or THRESH_MODE.ADAPTIVE
+    - `mode` is "auto", "manual", or "adaptive"
     - `trsh` is the threshold value for manual thresholding
     - `blck` is the blocksize for adaptive thresholding
     - `thrc` is the C value for adaptive thresholding
@@ -315,20 +271,20 @@ def process(data : np.ndarray,
     - `cleaned`     smoothed data after any blobs touching edges have been removed
     - `centers`     xy coordinates of centers of blobs
     """
-    assert data.dtype is np.uint8, "input data must be of dtype np.uint8"
+    assert data.dtype == "uint8", f"input data must be of dtype np.uint8; got type {data.dtype}"
     
     inverted = np.logical_xor(data).astype(np.uint8) if flip else data
     
-    if mode == THRESH_MODE.AUTO:
+    if mode == "auto":
         _, binary = cv2.threshold(inverted, trsh, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    if mode == THRESH_MODE.MANUAL:
+    if mode == "manual":
         _, binary = cv2.threshold(inverted, trsh, 1, cv2.THRESH_BINARY)
-    if mode == THRESH_MODE.ADAPTIVE:
+    if mode == "adaptive":
         binary = cv2.adaptiveThreshold(inverted, 1, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, blck, thrc)
 
     filled = fill_holes_binary(binary, init)
 
-    smoothed = spnd.median_filter(filled, footprint=ut.get_circular_kernel(smsz))
+    smoothed = spnd.median_filter(filled, footprint=get_circular_kernel(smsz))
 
     cleaned = clean_edges_binary(smoothed)
 
