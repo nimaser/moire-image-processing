@@ -23,7 +23,7 @@ from matplotlib.backend_bases import KeyEvent
 
 ### MATPLOTLIB MANIPULATION ###
 
-def add_toggleable_circles(fig : Figure, axs : list[Axes], points : np.ndarray, key : str) -> None:
+def add_toggleable_circles(fig : Figure, axs : np.ndarray[Axes], points : np.ndarray, key : str) -> None:
     """Adds circles for each point in `points` to each axis in `axs`, adding a visibility toggle."""
     circleslist = []
     for ax in axs.flatten():
@@ -40,10 +40,17 @@ def add_toggleable_circles(fig : Figure, axs : list[Axes], points : np.ndarray, 
                 circles.set_visible(not circles.get_visible())
             fig.canvas.draw_idle()
     fig.canvas.mpl_connect("key_press_event", toggle_visibility)
+    return circleslist
+
+def remove_toggleable_circles(circleslist : list) -> None:
+    """Removes the circles added by `add_toggleable_circles`."""
+    for circles in circleslist: circles.remove()
+    
     
 def add_processing_sequence(fig : Figure, ax : Axes, usecb : bool, imgs : np.ndarray, titles : list[str]) -> None:
     """Displays several images in sequence, using , and . to scroll between them."""
     index = 0
+    ax.set_title(titles[index] + "\n" + "▢"*index + "▣" + "▢"*(len(imgs) - index - 1))
     im = ax.imshow(imgs[index], cmap="gray")
     if usecb: cb = plt.colorbar(im, ax=ax, location="bottom")
     
@@ -56,7 +63,7 @@ def add_processing_sequence(fig : Figure, ax : Axes, usecb : bool, imgs : np.nda
         else: return
         index  = (index + shift) % len(imgs)
         
-        ax.set_title(titles[index])
+        ax.set_title(titles[index] + "\n" + "▢"*index + "▣" + "▢"*(len(imgs) - index - 1))
         im = ax.imshow(imgs[index], cmap="gray")
         if usecb: cb.update_normal(im)
         fig.canvas.draw_idle()

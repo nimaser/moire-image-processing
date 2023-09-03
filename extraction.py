@@ -33,6 +33,17 @@ params = dict(
     init = (10,9),
     smsz = 9
 )
+def params_str():
+    out = ""
+    out += f"-flip: {params['flip']}\n"
+    out += f"-mode: {params['mode']}\n"
+    out += f"-trsh: {params['trsh']}\n"
+    out += f"-blck: {params['blck']}\n"
+    out += f"-thrc: {params['thrc']}\n"
+    out += f"-init: {params['init']}\n"
+    out += f"-smsz: {params['smsz']}\n"
+    out += f"-open"
+    return out
 
 # initial data processing
 *imgs, centers = ut.extraction(img, **params)
@@ -61,14 +72,16 @@ cmdhandler.add_cmd("-init", 1, parse_init_tuple)
 
 def open_overlay_window():
     fig, ax = plt.subplots(figsize=(8, 8))
+    fig.suptitle("< , . > to move through image queue")
     ut.add_processing_sequence(fig, ax, True, imgs, titles)
     if len(centers.shape) > 1:
-        ut.add_toggleable_circles(fig, [ax], np.roll(centers, 1, axis=1), 'v')
+        ut.add_toggleable_circles(fig, np.array([ax]), np.roll(centers, 1, axis=1), 'v')
     fig.show()
 cmdhandler.add_cmd("-over", 0, open_overlay_window)
 
 # create figure
 fig, axs = plt.subplots(2, 3, sharex=True, sharey=True, figsize=(12, 8))
+fig.suptitle("v to toggle visibility of detected circles;\ne to open command window")
 fig.subplots_adjust(bottom=0.15)
 mc = MultiCursor(None, axs.flatten(), horizOn=True, color='b', lw=1)
 
@@ -93,19 +106,24 @@ update_axes()
 # command processing
 def open_command_window(event : KeyEvent) -> None:
     if event.key == 'e':
-        prompt = "Commands:\n-flip\n-mode\n-trsh\n-blck\n-thrc\n-init\n-smsz\n-over"
-        cmd = askstring("CmdPromptWindow", prompt)
-        print(params)
+        cmd = askstring("CmdPromptWindow", params_str())
         cmdhandler.process_cmd(cmd)
-        print(params)
-        global imgs, centers
+        
+        global imgs, centers, circleslist
         *imgs, centers = ut.extraction(img, **params)
         update_axes()
-        fig.canvas.draw_idle()
+        
+        ut.remove_toggleable_circles(circleslist)
+        circleslist = []
+        if len(centers.shape) > 1:
+            circleslist = ut.add_toggleable_circles(fig, axs, np.roll(centers, 1, axis=1), 'v')
+        
+        fig.canvas.draw()
 fig.canvas.mpl_connect("key_press_event", open_command_window)
-    
+
+circleslist = []
 if len(centers.shape) > 1:
-    ut.add_toggleable_circles(fig, axs, np.roll(centers, 1, axis=1), 'v')
+    circleslist = ut.add_toggleable_circles(fig, axs, np.roll(centers, 1, axis=1), 'v')
 
 plt.show()
 
