@@ -2,7 +2,6 @@
 # @date 2023/09/02
 
 import functools
-from enum import Enum
 from collections.abc import Callable
 
 import sxm_reader as sxm
@@ -12,7 +11,6 @@ import numpy as np
 import scipy.fft as spfft
 import scipy.ndimage as spnd
 
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 from matplotlib.axes import Axes
@@ -21,7 +19,7 @@ from matplotlib.patches import Circle
 from matplotlib.collections import PatchCollection
 from matplotlib.backend_bases import KeyEvent
 
-### MATPLOTLIB MANIPULATION ###
+########################################################### MATPLOTLIB
 
 def add_toggleable_circles(fig : Figure, axs : np.ndarray[Axes], points : np.ndarray, color : str, key : str) -> None:
     """Adds circles for each point in `points` to each axis in `axs`, adding a visibility toggle."""
@@ -47,7 +45,7 @@ def remove_toggleable_circles(circleslist : list) -> None:
     for circles in circleslist: circles.remove()
     
 def add_processing_sequence(fig : Figure, ax : Axes, usecb : bool, imgs : np.ndarray, titles : list[str]) -> None:
-    """Displays several images in sequence, using , and . to scroll between them."""
+    """Displays several images in sequence, using < , . and > to scroll between them."""
     index = 0
     ax.set_title(titles[index] + "\n" + "▢"*index + "▣" + "▢"*(len(imgs) - index - 1))
     im = ax.imshow(imgs[index], cmap="gray")
@@ -69,7 +67,7 @@ def add_processing_sequence(fig : Figure, ax : Axes, usecb : bool, imgs : np.nda
         
     fig.canvas.mpl_connect("key_press_event", change_image)
 
-### MISC ###
+########################################################### MISC
 
 def get_sxm_data(fname : str, print_channels : bool = False) -> np.ndarray:
     """Grabs the data from the .sxm file as an ndarray."""
@@ -127,7 +125,7 @@ class CommandProcessor:
         elif len(char) == 1:
             self.charbuffer.append(char)
 
-### IMAGES ###
+########################################################### IMAGES
 
 def run_shifted_fft(image_data : np.ndarray) -> np.ndarray:
     """Computes the FFT of `image_data` on outputs from -pi to pi."""
@@ -312,7 +310,7 @@ def extraction(data : np.ndarray,
     
     return flipped, binary, filled, smoothed, cleaned, masked, unweighted_centers, weighted_centers
 
-### DATA PROCESSING ###
+########################################################### DATA
 
 def centroid2D(vertices : np.ndarray) -> np.ndarray:
     """Finds the centroid of a set of xy points."""
@@ -347,7 +345,7 @@ def order_vertices(vertices : np.ndarray) -> np.ndarray:
     # reorder the vertices and return
     return vertices[indices].copy()
     
-### HEXAGONS ###
+########################################################### MATPLOTLIB MANIPULATION
 
 def plot_hex_radii(ax : Axes, vertices):
     """Plots the radii of a hexagon (vectors from its centroid to its vertices)."""

@@ -2,18 +2,18 @@
 # @date 2023/09/02
 
 import numpy as np
-import scipy.ndimage as spnd
+
+from tkinter.simpledialog import askstring
+
 import matplotlib.pyplot as plt
 from matplotlib.widgets import MultiCursor
-from tkinter.simpledialog import askstring
 from matplotlib.backend_bases import KeyEvent
 
-import PIL.Image
 import utils as ut
 
-# 002, 004, 005, 006, 008
-
 ###########################################################
+
+# 002, 004, 005, 006, 008
 
 # get image data
 fname = "images/m002.sxm"
@@ -43,6 +43,8 @@ def gen_params_str():
     out += f"-thrc: {params['thrc']}\n"
     out += f"-init: {params['init']}\n"
     out += f"-smth: {params['smth']}\n"
+    out += f"-expu\n"
+    out += f"-expw"
     return out
 
 # command handling
@@ -53,6 +55,8 @@ cmdhandler.add_cmd("-trsh", 1, lambda x: params.update(dict(trsh=int(x))))
 cmdhandler.add_cmd("-blck", 1, lambda x: params.update(dict(blck=int(x))))
 cmdhandler.add_cmd("-thrc", 1, lambda x: params.update(dict(thrc=int(x))))
 cmdhandler.add_cmd("-smth", 1, lambda x: params.update(dict(smth=int(x))))
+cmdhandler.add_cmd("-expu", 0, lambda: print("u"))
+cmdhandler.add_cmd("-expw", 0, lambda: print("w"))
 
 def parse_init_tuple(x, y):
     try:
@@ -65,7 +69,7 @@ cmdhandler.add_cmd("-init", 2, parse_init_tuple)
 
 # create figure
 fig, axs = plt.subplots(2, 3, sharex=True, sharey=True, figsize=(12, 8))
-fig.suptitle("1 toggles unweighted centroids; 2 toggles weighted centroids; - opens command window")
+fig.suptitle("1 toggles unweighted centroids; 2 toggles weighted centroids;\nw opens overlay window; - opens command window")
 mc = MultiCursor(None, axs.flatten(), horizOn=True, color='b', lw=1)
 
 # axes titles
@@ -146,5 +150,8 @@ if len(w_centers.shape) > 1:
     w_circleslist = ut.add_toggleable_circles(fig, axs, np.roll(w_centers, 1, axis=1), 'b', '2')
       
 plt.show()
+
+print(repr(uw_centers))
+print(repr(w_centers))
 
 ###########################################################

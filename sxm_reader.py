@@ -1,4 +1,5 @@
 # copied from https://github.com/EricJ928/sxm_data_visualization_tool/blob/main/sxmReader.py
+# this is literally a lifesaver go give that repository a star
 
 import os
 import struct
