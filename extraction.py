@@ -127,7 +127,7 @@ def open_overlay_window(event : KeyEvent):
     if event.key == 'w':
         fig, ax = plt.subplots(figsize=(8, 8))
         fig.suptitle("< , . > to move through image queue")
-        ut.add_processing_sequence(fig, ax, True, imgs, titles)
+        ut.add_image_sequence(fig, ax, True, imgs, titles)
         if len(uw_centers.shape) > 1:
             ut.add_toggleable_circles(fig, np.array([ax]), np.roll(uw_centers, 1, axis=1), 'r', '1')
         if len(w_centers.shape) > 1:

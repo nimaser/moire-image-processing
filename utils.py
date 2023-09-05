@@ -3,6 +3,7 @@
 
 import functools
 from collections.abc import Callable
+from typing import Self
 
 import sxm_reader as sxm
 
@@ -18,10 +19,21 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from matplotlib.collections import PatchCollection
 from matplotlib.backend_bases import KeyEvent
+from matplotlib.artist import Artist
+from matplotlib.quiver import Quiver
 
 ########################################################### MATPLOTLIB
 
-def add_toggleable_circles(fig : Figure, axs : np.ndarray[Axes], points : np.ndarray, color : str, key : str) -> None:
+def add_visibility_toggle(fig : Figure, artists : list[Artist], key : str) -> int:
+    """Adds a callback to toggle the visibility of the provided `artist` when `key` is pressed."""
+    def toggle_visibility(event : KeyEvent):
+        if event.key == key:
+            for artist in artists:
+                artist.set_visible(not artist.get_visible())
+            fig.canvas.draw_idle()
+    cid = fig.canvas.mpl_connect("key_press_event", toggle_visibility)
+
+def add_toggleable_circles(fig : Figure, axs : np.ndarray[Axes], points : np.ndarray, color : str, key : str) -> tuple[int, list[PatchCollection]]:
     """Adds circles for each point in `points` to each axis in `axs`, adding a visibility toggle."""
     circleslist = []
     for ax in axs.flatten():
@@ -31,20 +43,50 @@ def add_toggleable_circles(fig : Figure, axs : np.ndarray[Axes], points : np.nda
         circles = PatchCollection(circles, color=color, alpha=0.5)
         ax.add_collection(circles)
         circleslist.append(circles)
+    cid = add_visibility_toggle(fig, circleslist, key)
+    return cid, circleslist
 
-    def toggle_visibility(event : KeyEvent):
-        if event.key == key:
-            for circles in circleslist:
-                circles.set_visible(not circles.get_visible())
-            fig.canvas.draw_idle()
-    fig.canvas.mpl_connect("key_press_event", toggle_visibility)
-    return circleslist
+def add_toggleable_vectors(fig : Figure, axs : np.ndarray[Axes], positions : np.ndarray, vectors : np.ndarray, color : str, key : str) -> tuple[int, list[Quiver]]:
+    """Adds vectors for each point and vector in `positions` and `vectors` to each axis in `axs`, adding a visibility toggle."""
+    quiverlist = []
+    for ax in axs.flatten():
+        quiverlist.append(ax.quiver(*positions, *vectors, color=color, angles='xy', scale_units='xy', scale=1))
+    cid = add_visibility_toggle(fig, quiverlist, key)
+    return cid, quiverlist
 
-def remove_toggleable_circles(circleslist : list) -> None:
+def remove_toggleable_circles(fig : Figure, cid, circleslist : list[PatchCollection]) -> None:
     """Removes the circles added by `add_toggleable_circles`."""
     for circles in circleslist: circles.remove()
+    fig.canvas.mpl_disconnect(cid)
     
-def add_processing_sequence(fig : Figure, ax : Axes, usecb : bool, imgs : np.ndarray, titles : list[str]) -> None:
+def remove_toggleable_vectors(fig : Figure, cid, quiverlist : list[Quiver]) -> None:
+    """Removes the vectors added by `add_toggleable_vectors`."""
+    for quiver in quiverlist: quiver.remove()
+    fig.canvas.mpl_disconnect(cid)
+
+def add_artist_sequence(fig : Figure, ax : Axes, artists : list[Artist], title : str) -> None:
+    """Displays several artists in sequence, using < , . and > to scroll between them."""
+    index = 0
+    ax.set_title(title + "\n" + "▢"*index + "▣" + "▢"*(len(artists) - index - 1))
+    for artist in artists: artist.set_visible(False)
+    artists[index].set_visible(True)
+    
+    def change_artist(event : KeyEvent):
+        nonlocal index
+        if   event.key == ',': shift = -1
+        elif event.key == '<': shift = -2
+        elif event.key == '.': shift = 1
+        elif event.key == '>': shift = 2
+        else: return
+        index  = (index + shift) % len(artists)
+        
+        ax.set_title(title + "\n" + "▢"*index + "▣" + "▢"*(len(artists) - index - 1))
+        for artist in artists: artist.set_visible(False)
+        artists[index].set_visible(True)
+        fig.canvas.draw_idle()
+    fig.canvas.mpl_connect("key_press_event", change_artist)
+    
+def add_image_sequence(fig : Figure, ax : Axes, usecb : bool, imgs : np.ndarray, titles : list[str]) -> None:
     """Displays several images in sequence, using < , . and > to scroll between them."""
     index = 0
     ax.set_title(titles[index] + "\n" + "▢"*index + "▣" + "▢"*(len(imgs) - index - 1))
@@ -64,7 +106,6 @@ def add_processing_sequence(fig : Figure, ax : Axes, usecb : bool, imgs : np.nda
         im = ax.imshow(imgs[index], cmap="gray")
         if usecb: cb.update_normal(im)
         fig.canvas.draw_idle()
-        
     fig.canvas.mpl_connect("key_press_event", change_image)
 
 ########################################################### MISC
@@ -78,6 +119,7 @@ def get_sxm_data(fname : str, print_channels : bool = False) -> np.ndarray:
 
 class CommandProcessor:
     def __init__(self):
+        """Utility class to """
         self.charbuffer = []
         
         self.flags = []
@@ -345,7 +387,7 @@ def order_vertices(vertices : np.ndarray) -> np.ndarray:
     # reorder the vertices and return
     return vertices[indices].copy()
     
-########################################################### MATPLOTLIB MANIPULATION
+########################################################### SCHEDULED FOR REPROGRAMMING
 
 def plot_hex_radii(ax : Axes, vertices):
     """Plots the radii of a hexagon (vectors from its centroid to its vertices)."""
@@ -440,3 +482,143 @@ def transform_image(data : np.ndarray, A : np.ndarray) -> np.ndarray:
     return cv2.warpAffine(data, A, tuple(data.shape))
     
     
+
+########################################################### LATTICE VECTOR IDENTIFICATION
+
+class Point:
+    def __init__(self, coords : np.ndarray):
+        self.coords = coords
+        self.x = coords[0]
+        self.y = coords[1]
+        
+    def distance_to(self, other : Self) -> float:
+        return np.sqrt(np.sum((other.coords - self.coords) ** 2))
+    
+    def vector_to(self, other : Self) -> np.ndarray:
+        return other.coords - self.coords
+    
+    def add_vector(self, vector : np.ndarray) -> Self:
+        return Point(self.coords + vector)
+        
+    def order_by_nearest(self, others : np.ndarray[Self]) -> np.ndarray[Self]:
+        distances = np.array([self.distance_to(other) for other in others])
+        return others[np.argsort(distances)]
+    
+    def pop_closest(self, others : list[Self]) -> Self:
+        closest = self.order_by_nearest(np.array(others))[0]
+        others.remove(closest)
+        return closest
+        
+    def pop_closest_within_range(self, others : list[Self], range : float) -> Self | None:
+        distances = np.array([self.distance_to(other) for other in others])
+        idx = np.argsort(distances)
+        distances, points = distances[idx], np.array(others)[idx]
+        
+        in_range = distances <= range
+        if not np.any(in_range): return None
+        
+        # https://stackoverflow.com/a/1044443/22391526
+        idx_first_in_range = np.nonzero(in_range)[0][0]
+        closest = points[idx_first_in_range]
+        others.remove(closest)
+        return closest
+        
+class Line:
+    def __init__(self, initial_points : tuple[Point, Point], tolerance : float):
+        self.points = initial_points
+        self.endpoints = [initial_points[0], initial_points[1]]
+        self.vector = self.endpoints[0].vector_to(self.endpoints[1])
+        self.range = np.linalg.norm(self.vector) * tolerance
+        
+    def get_points_as_ndarray(self) -> np.ndarray:
+        return np.array([point.coords for point in self.points])
+        
+    def __contains__(self, point : Point):
+        return point in self.points
+    
+    def __len__(self):
+        return len(self.points)
+        
+    def extend_endpoint(self, index : bool, points : list[Point]) -> bool:
+        new_point_area = self.endpoints[index].add_vector( (1 if index else -1) * self.vector)
+        new = new_point_area.pop_closest_within_range(points, self.range)
+        
+        if new is not None:
+            if new in self.points: raise Exception("duplicated point somehow")
+            self.points.append(new)
+            self.endpoints[index] = new
+            return True
+        return False
+        
+    def extend(self, points : list[Point]) -> None:
+        while self.extend_endpoint(0, points): pass
+        while self.extend_endpoint(1, points): pass
+        
+    def get_spanning_vector(self) -> tuple[np.ndarray, np.ndarray]:
+        pos = self.endpoints[0].coords
+        vec = (self.endpoints[1].coords - self.endpoints[0].coords)
+        return pos, vec
+    
+    def get_lattice_vector(self) -> np.ndarray:
+        return (self.endpoints[1].coords - self.endpoints[0].coords) / (len(self.points) - 1)
+        
+class ParallelLineSet:
+    def __init__(self, point_source : list[Point] | Self, tolerance : float):
+        self.unincluded_points = []
+        
+        if type(point_source) is list:
+            self.points = point_source
+            
+            origin = self.points.pop(0)
+            closest = origin.pop_closest(self.points)
+        else:
+            self.points = []
+            for line in point_source.lines[1:]: self.points.extend(line.points)
+            self.points.extend(point_source.unincluded_points)
+            
+            origin = point_source.lines[0].points[0]
+            closest = origin.pop_closest(self.points)
+            
+            self.points.extend(point_source.lines[0].points[1:])
+            
+        init = Line([origin, closest], tolerance)
+        init.extend(self.points)
+        self.vector = init.vector
+        
+        self.lines = [init]
+        self.tolerance = tolerance
+        self.range = np.linalg.norm(self.vector) * tolerance
+        
+        self.get_parallel()
+            
+    def get_parallel(self):
+        while len(self.points) > 0:
+            origin = self.points.pop(0)
+            
+            new_point_area = origin.add_vector(self.vector)
+            new_point = new_point_area.pop_closest_within_range(self.points, self.range)
+            
+            if new_point is not None:
+                new_line = Line([origin, new_point], self.tolerance)
+            else:
+                new_point_area = origin.add_vector(-self.vector)
+                new_point = new_point_area.pop_closest_within_range(self.points, self.range)
+                if new_point is not None:
+                    new_line = Line([new_point, origin], self.tolerance)
+                else:
+                    self.unincluded_points.append(origin)
+                    continue
+
+            new_line.extend(self.points)
+            self.lines.append(new_line)
+    
+    def get_lattice_vector(self) -> np.ndarray:
+        vec = np.array([0, 0])
+        for line in self.lines:
+            vec = vec + line.get_lattice_vector()
+        return vec / len(self.lines)
+    
+    def get_origin(self) -> np.ndarray:
+        return self.lines[0].points[0].coords
+        
+###########################################################
