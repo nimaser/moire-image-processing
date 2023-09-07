@@ -119,14 +119,15 @@ def get_sxm_data(fname : str, print_channels : bool = False) -> np.ndarray:
 
 class CommandProcessor:
     def __init__(self):
-        """Utility class to """
-        self.charbuffer = []
-        
+        """Utility class to process an input command string containing flags and args
+        and run functions with those args as a result."""
         self.flags = []
         self.num_args = []
         self.functions = []
         
     def add_cmd(self, flag : str, num_args : int, func : Callable) -> None:
+        """Adds a the command `-flag [arg_1] [arg_2] ... [arg_num_args]` which will run
+        `func(arg_1, arg_2, ..., arg_num_args)`."""
         if not flag.startswith("-"): raise Exception("flags must start with a dash (-) character")
         if flag not in self.flags:
             self.flags.append(flag)
@@ -134,9 +135,11 @@ class CommandProcessor:
             self.functions.append(func)
             
     def process_cmd(self, cmdstring) -> None:
+        """Parses a command string and if it is valid, runs the commands contained in it."""
         if cmdstring is None or len(cmdstring) == 0: return
         cmds = []
         
+        # split the string into one list per command, collecting these lists in `cmds`
         words = "".join(cmdstring).split()
         cmd = []
         while len(words) > 0:
@@ -147,6 +150,7 @@ class CommandProcessor:
                 cmd.append(words.pop(0))
         if len(cmd) > 0: cmds.append(cmd)
         
+        # construct the function call for each of these commands, and if they're all valid, run them all
         func_queue = []
         for cmd in cmds:
             flag, args = cmd.pop(0), cmd
@@ -157,15 +161,6 @@ class CommandProcessor:
             
             func_queue.append(functools.partial(self.functions[ind], *args))
         for func in func_queue: func()
-        
-    def append_char(self, char):
-        if char == 'enter':
-            self.process_cmd(self.charbuffer)
-            self.charbuffer = []
-        elif char == 'backspace':
-            if len(self.charbuffer) > 0: self.charbuffer.pop()
-        elif len(char) == 1:
-            self.charbuffer.append(char)
 
 ########################################################### IMAGES
 
@@ -481,35 +476,41 @@ def transform_image(data : np.ndarray, A : np.ndarray) -> np.ndarray:
     """
     return cv2.warpAffine(data, A, tuple(data.shape))
     
-    
-
 ########################################################### LATTICE VECTOR IDENTIFICATION
 
 class Point:
     def __init__(self, coords : np.ndarray):
+        """Represents a single point in an xy plane."""
         self.coords = coords
         self.x = coords[0]
         self.y = coords[1]
         
     def distance_to(self, other : Self) -> float:
+        """Gets the distance to another Point."""
         return np.sqrt(np.sum((other.coords - self.coords) ** 2))
     
     def vector_to(self, other : Self) -> np.ndarray:
+        """Returns a vector to another Point."""
         return other.coords - self.coords
     
     def add_vector(self, vector : np.ndarray) -> Self:
+        """Returns the Point resulting from moving this Point by `vector`."""
         return Point(self.coords + vector)
         
     def order_by_nearest(self, others : np.ndarray[Self]) -> np.ndarray[Self]:
+        """Orders the provided ndarray of Points by distance to this Point."""
         distances = np.array([self.distance_to(other) for other in others])
         return others[np.argsort(distances)]
     
     def pop_closest(self, others : list[Self]) -> Self:
+        """Pops the Point nearest to this Point from the given list of Points and returns it."""
         closest = self.order_by_nearest(np.array(others))[0]
         others.remove(closest)
         return closest
         
     def pop_closest_within_range(self, others : list[Self], range : float) -> Self | None:
+        """Pops the Point nearest to this Point from the given list of Points and returns it.,
+        given that that Point is within `range`. If no such point exists, returns None."""
         distances = np.array([self.distance_to(other) for other in others])
         idx = np.argsort(distances)
         distances, points = distances[idx], np.array(others)[idx]
@@ -525,21 +526,26 @@ class Point:
         
 class Line:
     def __init__(self, initial_points : tuple[Point, Point], tolerance : float):
+        """Represents a line of lattice points in an xy plane."""
         self.points = initial_points
         self.endpoints = [initial_points[0], initial_points[1]]
         self.vector = self.endpoints[0].vector_to(self.endpoints[1])
         self.range = np.linalg.norm(self.vector) * tolerance
         
     def get_points_as_ndarray(self) -> np.ndarray:
+        """Returns an ndarray containing coordinates of all points in this Line."""
         return np.array([point.coords for point in self.points])
         
     def __contains__(self, point : Point):
+        """Returns whether the provided Point is currently in this Line."""
         return point in self.points
     
     def __len__(self):
+        """Returns the number of points currently in this Line."""
         return len(self.points)
         
     def extend_endpoint(self, index : bool, points : list[Point]) -> bool:
+        """Attempts to extend the endpoint at `index` by one lattice vector."""
         new_point_area = self.endpoints[index].add_vector( (1 if index else -1) * self.vector)
         new = new_point_area.pop_closest_within_range(points, self.range)
         
@@ -551,19 +557,23 @@ class Line:
         return False
         
     def extend(self, points : list[Point]) -> None:
+        """Attempts to extend this line by as many lattice vectors as possible."""
         while self.extend_endpoint(0, points): pass
         while self.extend_endpoint(1, points): pass
         
     def get_spanning_vector(self) -> tuple[np.ndarray, np.ndarray]:
+        """Gets a vector spanning from one endpoint to the other, located at the first endpoint."""
         pos = self.endpoints[0].coords
         vec = (self.endpoints[1].coords - self.endpoints[0].coords)
         return pos, vec
     
     def get_lattice_vector(self) -> np.ndarray:
+        """Returns the lattice vector of this Line."""
         return (self.endpoints[1].coords - self.endpoints[0].coords) / (len(self.points) - 1)
         
 class ParallelLineSet:
     def __init__(self, point_source : list[Point] | Self, tolerance : float):
+        """"""
         self.unincluded_points = []
         
         if type(point_source) is list:
@@ -592,6 +602,7 @@ class ParallelLineSet:
         self.get_parallel()
             
     def get_parallel(self):
+        """"""
         while len(self.points) > 0:
             origin = self.points.pop(0)
             
@@ -613,12 +624,14 @@ class ParallelLineSet:
             self.lines.append(new_line)
     
     def get_lattice_vector(self) -> np.ndarray:
+        """"""
         vec = np.array([0, 0])
         for line in self.lines:
             vec = vec + line.get_lattice_vector()
         return vec / len(self.lines)
     
     def get_origin(self) -> np.ndarray:
+        """"""
         return self.lines[0].points[0].coords
         
 ###########################################################

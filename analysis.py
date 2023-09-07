@@ -3,14 +3,11 @@
 
 import numpy as np
 
-
 import matplotlib.pyplot as plt
-from matplotlib.widgets import MultiCursor
-from matplotlib.backend_bases import KeyEvent
 
 import utils as ut
 
-fname = "images/m002.sxm"
+fname = "images/m004.sxm"
 if fname.endswith(".sxm"):
     img = ut.get_sxm_data(fname, False)
     img = ut.scale_to_uint8(img)
@@ -30,10 +27,10 @@ w_centers = np.array([[108.28071992, 115.32948718],
 
 fractional_tolerance = 0.4
 
-points = [Point(center) for center in w_centers]
+points = [ut.Point(center) for center in w_centers]
 
-pls0 = ParallelLineSet(points, fractional_tolerance)
-pls1 = ParallelLineSet(pls0  , fractional_tolerance)
+pls0 = ut.ParallelLineSet(points, fractional_tolerance)
+pls1 = ut.ParallelLineSet(pls0  , fractional_tolerance)
 
 fig, ax = plt.subplots(figsize=(8, 8))
 ax.imshow(img, cmap="gray")

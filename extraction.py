@@ -109,16 +109,18 @@ def open_command_window(event : KeyEvent) -> None:
         *imgs, uw_centers, w_centers = ut.extraction(img, **params)
         
         # replot imgs and centers and redraw
-        global uw_circleslist, w_circleslist
+        global uw_cid, w_cid, uw_circleslist, w_circleslist
         update_axes()
-        ut.remove_toggleable_circles(uw_circleslist)
-        ut.remove_toggleable_circles(w_circleslist)
+        ut.remove_toggleable_circles(fig, uw_cid, uw_circleslist)
+        ut.remove_toggleable_circles(fig, w_cid, w_circleslist)
+        uw_cid = None
+        w_cid = None
         uw_circleslist = []
         w_circleslist = []
         if len(uw_centers.shape) > 1:
-            uw_circleslist = ut.add_toggleable_circles(fig, axs, np.roll(uw_centers, 1, axis=1), 'r', '1')
+            uw_cid, uw_circleslist = ut.add_toggleable_circles(fig, axs, np.roll(uw_centers, 1, axis=1), 'r', '1')
         if len(w_centers.shape) > 1:
-            w_circleslist = ut.add_toggleable_circles(fig, axs, np.roll(w_centers, 1, axis=1), 'b', '2')
+            w_cid, w_circleslist = ut.add_toggleable_circles(fig, axs, np.roll(w_centers, 1, axis=1), 'b', '2')
         fig.canvas.draw()
 fig.canvas.mpl_connect("key_press_event", open_command_window)
 
@@ -142,16 +144,48 @@ fig.canvas.mpl_connect("key_press_event", open_overlay_window)
 update_axes()
 
 # add circles if any were found
+uw_cid = None
+w_cid = None
 uw_circleslist = []
 w_circleslist = []
 if len(uw_centers.shape) > 1:
-    uw_circleslist = ut.add_toggleable_circles(fig, axs, np.roll(uw_centers, 1, axis=1), 'r', '1')
+    uw_cid, uw_circleslist = ut.add_toggleable_circles(fig, axs, np.roll(uw_centers, 1, axis=1), 'r', '1')
 if len(w_centers.shape) > 1:
-    w_circleslist = ut.add_toggleable_circles(fig, axs, np.roll(w_centers, 1, axis=1), 'b', '2')
+    w_cid, w_circleslist = ut.add_toggleable_circles(fig, axs, np.roll(w_centers, 1, axis=1), 'b', '2')
       
 plt.show()
 
-print(repr(uw_centers))
-print(repr(w_centers))
-
 ###########################################################
+
+points = [ut.Point(center) for center in w_centers]
+if len(points) < 3: exit()
+
+fractional_tolerance = 0.4
+
+pls0 = ut.ParallelLineSet(points, fractional_tolerance)
+pls1 = ut.ParallelLineSet(pls0  , fractional_tolerance)
+
+fig, ax = plt.subplots(figsize=(8, 8))
+ax.imshow(imgs[0], cmap="gray")
+ut.add_toggleable_circles(fig, np.array([ax]), np.roll(w_centers, 1, axis=1), 'b', '1')
+
+for line, color, key in zip(pls0.lines, ['r', 'g', 'c'], ['3', '3', '3']):
+    ut.add_toggleable_circles(fig, np.array([ax]), np.roll(line.get_points_as_ndarray(), 1, axis=1), color, key)
+    pos, vec = line.get_spanning_vector()
+    ut.add_toggleable_vectors(fig, np.array([ax]), np.roll(pos, 1, axis=0), np.roll(vec, 1, axis=0), color, key)
+
+for line, color, key in zip(pls1.lines, ['r', 'g', 'c', 'y'], ['4', '4', '4', '4']):
+    ut.add_toggleable_circles(fig, np.array([ax]), np.roll(line.get_points_as_ndarray(), 1, axis=1), color, key)
+    pos, vec = line.get_spanning_vector()
+    ut.add_toggleable_vectors(fig, np.array([ax]), np.roll(pos, 1, axis=0), np.roll(vec, 1, axis=0), color, key)
+    
+latvec0 = pls0.get_lattice_vector()
+latvec1 = pls1.get_lattice_vector()
+vec = np.concatenate([latvec0[:, np.newaxis], latvec1[:, np.newaxis]], axis=1)
+
+latpos = pls0.get_origin()
+pos = np.concatenate([latpos[:, np.newaxis], latpos[:, np.newaxis]], axis=1)
+
+ut.add_toggleable_vectors(fig, np.array([ax]), np.roll(pos, 1, 0), np.roll(vec, 1, 0), 'k', '2')
+    
+plt.show()
